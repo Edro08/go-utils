@@ -1,7 +1,7 @@
 package config
 
 import (
-	"github.com/Edro08/go-utils/config"
+	"github.com/edro08/go-utils/config"
 	"reflect"
 	"testing"
 )

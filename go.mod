@@ -1,4 +1,4 @@
-module github.com/Edro08/go-utils
+module github.com/edro08/go-utils
 
 go 1.24.2
 

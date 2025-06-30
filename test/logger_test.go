@@ -1,7 +1,7 @@
 package config
 
 import (
-	"github.com/Edro08/go-utils/logger"
+	"github.com/edro08/go-utils/logger"
 	"testing"
 )
 

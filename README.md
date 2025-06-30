@@ -1,8 +1,6 @@
 ## 💻 go-utils
 
-> **Descripción:** Una librería de utilidades generales para proyectos en Go. Incluye herramientas reutilizables para lectura de configuraciones, logs.
-
----
+**Descripción:** Una librería de utilidades generales para proyectos en Go. Incluye herramientas reutilizables para lectura de configuraciones, logs.
 
 ### 🔌 Instalación
 

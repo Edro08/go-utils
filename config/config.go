@@ -24,7 +24,7 @@ type IConfig interface {
 	HasKey(keys string, valueType ValueType) bool
 	GetKeys(keys string) []string
 	GetNestedConfig(keys string) IConfig
-	// Set(key string, value interface{}) error
+	Set(key string, value interface{}) error
 }
 
 // ------------------------------------------------------------------------------------------------
@@ -205,5 +205,9 @@ func (c *Config) GetNestedConfig(keys string) IConfig {
 		return &Config{data: map[string]interface{}{}}
 	}
 
-	return &Config{data: sm}
+	return &Config{data: sm, opts: c.opts}
+}
+
+func (c *Config) Set(key string, value interface{}) error {
+	return nil
 }

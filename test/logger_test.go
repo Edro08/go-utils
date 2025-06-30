@@ -7,7 +7,7 @@ import (
 
 func TestLogger_TEXT(t *testing.T) {
 	opts := logger.Opts{
-		MinLevel: logger.LevelDebug,
+		MinLevel: logger.DEBUG,
 		Format:   logger.FormatText,
 	}
 
@@ -18,7 +18,7 @@ func TestLogger_TEXT(t *testing.T) {
 
 func TestLogger_JSON(t *testing.T) {
 	opts := logger.Opts{
-		MinLevel: logger.LevelDebug,
+		MinLevel: logger.DEBUG,
 		Format:   logger.FormatJSON,
 	}
 	newLogger, _ := logger.NewLogger(opts)
@@ -28,7 +28,7 @@ func TestLogger_JSON(t *testing.T) {
 
 func TestLogger_HiddenDebug(t *testing.T) {
 	opts := logger.Opts{
-		MinLevel: logger.LevelInfo,
+		MinLevel: logger.INFO,
 		Format:   logger.FormatText,
 	}
 	newLogger, _ := logger.NewLogger(opts)

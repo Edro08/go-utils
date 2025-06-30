@@ -13,22 +13,22 @@ type Opts struct {
 // Level
 // ------------------------------------------------------------------------------------------------
 
-type Level string
+type Level int
 
 const (
-	LevelInfo  Level = "INFO"
-	LevelWarn  Level = "WARN"
-	LevelError Level = "ERROR"
-	LevelFatal Level = "FATAL"
-	LevelDebug Level = "DEBUG"
+	DEBUG Level = iota
+	INFO
+	WARN
+	ERROR
+	FATAL
 )
 
-var levelOrder = map[Level]int{
-	LevelDebug: 0,
-	LevelInfo:  1,
-	LevelWarn:  2,
-	LevelError: 3,
-	LevelFatal: 4,
+var levelLabels = map[Level]string{
+	DEBUG: "DEBUG",
+	INFO:  "INFO",
+	WARN:  "WARN",
+	ERROR: "ERROR",
+	FATAL: "FATAL",
 }
 
 // ------------------------------------------------------------------------------------------------
@@ -55,8 +55,8 @@ func NewLogger(opts Opts) (*Logger, error) {
 		opts.Format = FormatJSON
 	}
 
-	if levelOrder[opts.MinLevel] < levelOrder[LevelDebug] || levelOrder[opts.MinLevel] > levelOrder[LevelFatal] {
-		opts.MinLevel = LevelDebug
+	if opts.MinLevel < DEBUG || opts.MinLevel > FATAL {
+		opts.MinLevel = INFO
 	}
 
 	return &Logger{

@@ -5,6 +5,19 @@ import (
 	"strings"
 )
 
+// formatKeys convierte una lista de elementos (esperados como pares clave-valor) en una cadena formateada.
+// Cada par se muestra en el formato: " | clave = valor". Si falta el valor o es nil, se reemplaza con etiquetas "<missing>" o "<nil>".
+//
+// Parámetros:
+//   - keys: Slice de elementos alternando clave (string) y valor (any)
+//
+// Retorna:
+//   - Una cadena con todos los pares clave-valor concatenados en formato legible.
+//     Si el slice está vacío, se retorna una cadena vacía.
+//
+// Ejemplo de salida:
+//
+//	" | usuario = juan | activo = true | edad = 30"
 func formatKeys(keys []any) string {
 	if len(keys) == 0 {
 		return ""
@@ -12,7 +25,6 @@ func formatKeys(keys []any) string {
 
 	var sb strings.Builder
 	for i := 0; i < len(keys); i += 2 {
-		// Procesar clave
 		var key string
 		if k, ok := keys[i].(string); ok && k != "" {
 			key = k
@@ -20,7 +32,6 @@ func formatKeys(keys []any) string {
 			key = fmt.Sprintf("<key:%v>", keys[i])
 		}
 
-		// Procesar valor
 		val := "<missing>"
 		if i+1 < len(keys) {
 			if keys[i+1] != nil {

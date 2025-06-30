@@ -6,7 +6,8 @@ import (
 	"strings"
 )
 
-// convertToStringMap converts a map to map[string]string.
+// convertToStringMap convierte un map[string]interface{} a map[string]string,
+// aplicando la conversión a string para cada valor.
 func convertToStringMap(input map[string]interface{}) (map[string]string, bool) {
 	data := make(map[string]string)
 	for k, v := range input {
@@ -15,7 +16,8 @@ func convertToStringMap(input map[string]interface{}) (map[string]string, bool) 
 	return data, true
 }
 
-// convertToIntMap converts a map to map[string]int.
+// convertToIntMap convierte un map[string]interface{} a map[string]int,
+// aplicando la conversión a int para cada valor.
 func convertToIntMap(input map[string]interface{}) (map[string]int, bool) {
 	data := make(map[string]int)
 	for k, v := range input {
@@ -24,7 +26,8 @@ func convertToIntMap(input map[string]interface{}) (map[string]int, bool) {
 	return data, true
 }
 
-// convertToFloatMap converts a map to map[string]float64.
+// convertToFloatMap convierte un map[string]interface{} a map[string]float64,
+// aplicando la conversión a float64 para cada valor.
 func convertToFloatMap(input map[string]interface{}) (map[string]float64, bool) {
 	data := make(map[string]float64)
 	for k, v := range input {
@@ -33,7 +36,8 @@ func convertToFloatMap(input map[string]interface{}) (map[string]float64, bool) 
 	return data, true
 }
 
-// convertToBoolMap converts a map to map[string]bool.
+// convertToBoolMap convierte un map[string]interface{} a map[string]bool,
+// aplicando la conversión a bool para cada valor.
 func convertToBoolMap(input map[string]interface{}) (map[string]bool, bool) {
 	data := make(map[string]bool)
 	for k, v := range input {
@@ -42,7 +46,8 @@ func convertToBoolMap(input map[string]interface{}) (map[string]bool, bool) {
 	return data, true
 }
 
-// convertToStringSlice converts a slice to []string.
+// convertToStringSlice convierte un slice []interface{} a []string,
+// aplicando la conversión a string para cada elemento.
 func convertToStringSlice(input []interface{}) ([]string, bool) {
 	result := make([]string, 0, len(input))
 	for _, v := range input {
@@ -51,7 +56,8 @@ func convertToStringSlice(input []interface{}) ([]string, bool) {
 	return result, true
 }
 
-// convertToIntSlice converts a slice to []int.
+// convertToIntSlice convierte un slice []interface{} a []int,
+// aplicando la conversión a int para cada elemento.
 func convertToIntSlice(input []interface{}) ([]int, bool) {
 	result := make([]int, 0, len(input))
 	for _, v := range input {
@@ -60,7 +66,8 @@ func convertToIntSlice(input []interface{}) ([]int, bool) {
 	return result, true
 }
 
-// convertToFloatSlice converts a slice to []float64.
+// convertToFloatSlice convierte un slice []interface{} a []float64,
+// aplicando la conversión a float64 para cada elemento.
 func convertToFloatSlice(input []interface{}) ([]float64, bool) {
 	result := make([]float64, 0, len(input))
 	for _, v := range input {
@@ -69,7 +76,8 @@ func convertToFloatSlice(input []interface{}) ([]float64, bool) {
 	return result, true
 }
 
-// convertToBoolSlice converts a slice to []bool.
+// convertToBoolSlice convierte un slice []interface{} a []bool,
+// aplicando la conversión a bool para cada elemento.
 func convertToBoolSlice(input []interface{}) ([]bool, bool) {
 	result := make([]bool, 0, len(input))
 	for _, v := range input {
@@ -78,7 +86,9 @@ func convertToBoolSlice(input []interface{}) ([]bool, bool) {
 	return result, true
 }
 
-// toString converts a value to string.
+// toString convierte cualquier valor básico a string,
+// manejando tipos numéricos, booleanos y cadenas.
+// Para tipos no reconocidos devuelve cadena vacía.
 func toString(value interface{}) string {
 	switch v := value.(type) {
 	case string:
@@ -96,7 +106,8 @@ func toString(value interface{}) string {
 	}
 }
 
-// toFloat64 converts a value to float64.
+// toInt convierte un valor básico a int, realizando conversiones
+// seguras desde tipos numéricos y cadenas. Retorna 0 si no es convertible.
 func toInt(value interface{}) int {
 	switch v := value.(type) {
 	case int:
@@ -132,7 +143,9 @@ func toInt(value interface{}) int {
 	}
 }
 
-// toFloat64 converts a value to float64.
+// toFloat64 convierte un valor básico a float64, incluyendo conversiones
+// desde enteros, flotantes y cadenas.
+// Retorna 0 si no es convertible.
 func toFloat64(value interface{}) float64 {
 	switch v := value.(type) {
 	case float64:
@@ -162,7 +175,9 @@ func toFloat64(value interface{}) float64 {
 	}
 }
 
-// toBool converts a value to bool.
+// toBool convierte un valor básico a bool, aceptando valores booleanos
+// y cadenas "true"/"false" (sin distinguir mayúsculas).
+// Retorna false si no es convertible.
 func toBool(value interface{}) bool {
 	switch v := value.(type) {
 	case bool:

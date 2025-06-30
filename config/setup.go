@@ -10,8 +10,13 @@ import (
 // Struct Options
 // ------------------------------------------------------------------------------------------------
 
+const (
+	defaultSeparator = "."
+)
+
 type Opts struct {
-	File string
+	File      string
+	Separator string
 }
 
 // ------------------------------------------------------------------------------------------------
@@ -20,6 +25,7 @@ type Opts struct {
 
 type Config struct {
 	data map[string]interface{}
+	opts Opts
 }
 
 func NewConfig(opts Opts) (*Config, error) {
@@ -35,5 +41,9 @@ func NewConfig(opts Opts) (*Config, error) {
 		return nil, fmt.Errorf("error unmarshalling YAML: %w", err)
 	}
 
-	return &Config{data: data}, nil
+	if opts.Separator == "" {
+		opts.Separator = defaultSeparator
+	}
+
+	return &Config{data: data, opts: opts}, nil
 }

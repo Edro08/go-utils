@@ -24,6 +24,7 @@ func convertToIntMap(input map[string]interface{}) (map[string]int, bool) {
 	return data, true
 }
 
+// convertToFloatMap converts a map to map[string]float64.
 func convertToFloatMap(input map[string]interface{}) (map[string]float64, bool) {
 	data := make(map[string]float64)
 	for k, v := range input {
@@ -32,6 +33,7 @@ func convertToFloatMap(input map[string]interface{}) (map[string]float64, bool) 
 	return data, true
 }
 
+// convertToBoolMap converts a map to map[string]bool.
 func convertToBoolMap(input map[string]interface{}) (map[string]bool, bool) {
 	data := make(map[string]bool)
 	for k, v := range input {
@@ -76,6 +78,7 @@ func convertToBoolSlice(input []interface{}) ([]bool, bool) {
 	return result, true
 }
 
+// toString converts a value to string.
 func toString(value interface{}) string {
 	switch v := value.(type) {
 	case string:
@@ -93,6 +96,7 @@ func toString(value interface{}) string {
 	}
 }
 
+// toFloat64 converts a value to float64.
 func toInt(value interface{}) int {
 	switch v := value.(type) {
 	case int:
@@ -118,7 +122,6 @@ func toInt(value interface{}) int {
 		}
 		return 0
 	case string:
-		// Opcional: intentar parsear string a int
 		i, err := strconv.Atoi(v)
 		if err == nil {
 			return i
@@ -129,6 +132,7 @@ func toInt(value interface{}) int {
 	}
 }
 
+// toFloat64 converts a value to float64.
 func toFloat64(value interface{}) float64 {
 	switch v := value.(type) {
 	case float64:
@@ -148,7 +152,6 @@ func toFloat64(value interface{}) float64 {
 	case uint32:
 		return float64(v)
 	case string:
-		// Opcional: intentar parsear string a float64
 		f, err := strconv.ParseFloat(v, 64)
 		if err == nil {
 			return f
@@ -159,6 +162,7 @@ func toFloat64(value interface{}) float64 {
 	}
 }
 
+// toBool converts a value to bool.
 func toBool(value interface{}) bool {
 	switch v := value.(type) {
 	case bool:

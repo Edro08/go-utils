@@ -45,7 +45,7 @@ import (
 - Crear un nuevo logger con `NewLogger`
 ```go
 opts := logger.Opts{
-	MinLevel: logger.LevelDebug, 
+	MinLevel: logger.DEBUG, 
 	Format:   logger.FormatText,
 }
 

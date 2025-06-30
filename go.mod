@@ -1,5 +1,5 @@
 module github.com/Edro08/go-utils
 
-go 1.23.1
+go 1.24.2
 
 require gopkg.in/yaml.v3 v3.0.1

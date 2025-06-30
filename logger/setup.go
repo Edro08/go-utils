@@ -50,16 +50,16 @@ type Logger struct {
 	opts Opts
 }
 
-func NewLogger(opts Opts) *Logger {
+func NewLogger(opts Opts) (*Logger, error) {
 	if opts.Format != FormatJSON && opts.Format != FormatText {
 		opts.Format = FormatJSON
 	}
 
-	if opts.MinLevel < LevelDebug || opts.MinLevel > LevelFatal {
+	if levelOrder[opts.MinLevel] < levelOrder[LevelDebug] || levelOrder[opts.MinLevel] > levelOrder[LevelFatal] {
 		opts.MinLevel = LevelDebug
 	}
 
 	return &Logger{
 		opts: opts,
-	}
+	}, nil
 }

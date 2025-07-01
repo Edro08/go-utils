@@ -1,3 +1,59 @@
+/*
+Package cors provee un middleware para manejar CORS (Cross-Origin Resource Sharing)
+en aplicaciones web escritas en Go.
+
+Este paquete facilita la configuración de políticas CORS como:
+- Orígenes permitidos
+- Métodos HTTP permitidos
+- Cabeceras permitidas y expuestas
+- Credenciales
+- Tiempo de caché para preflight requests
+
+Uso básico:
+
+	options := cors.Options{
+	    AllowedOrigins:   []string{"https://example.com"},
+	    AllowedMethods:   []string{"GET", "POST", "OPTIONS"},
+	    AllowedHeaders:   []string{"Content-Type", "Authorization"},
+	    ExposedHeaders:   []string{"X-Custom-Header"},
+	    AllowCredentials: true,
+	    MaxAge:           3600,
+	    Connection:       "keep-alive",
+	}
+
+	corsHandler := cors.NewCorsHandler(options)
+
+	http.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
+	    corsHandler.CorsHandler(w, r)
+	    // lógica adicional para manejar la petición
+	})
+
+Estructuras y funciones principales:
+
+  - type Options: configuración principal para CORS, incluye listas de orígenes, métodos,
+    cabeceras permitidas y otros parámetros.
+
+- func NewCors(option Options) *Options: constructor para crear un handler CORS configurado.
+
+  - func (c *Options) CorsHandler(w http.ResponseWriter, r *http.Request):
+    maneja la respuesta CORS agregando los headers necesarios según la configuración
+    y el request recibido.
+
+  - Métodos auxiliares para establecer cada header CORS:
+    setAllowMethodsHeader, setAllowHeadersHeader, setAllowOriginHeader, etc.
+
+  - Función interna isMatch(target string, values []string) (string, bool):
+    verifica si un valor está contenido en una lista (ignorando mayúsculas/minúsculas)
+    y permite la presencia del valor wildcard "*".
+
+- Función splitAndTrim(input string) []string: ayuda a procesar cabeceras separadas por coma.
+
+Mensajes de estado para respuesta JSON:
+
+  - MsgStatusForbidden: acceso denegado cuando el origen no está permitido.
+  - MsgStatusMethodNotAllowed: método HTTP no permitido.
+  - MsgStatusOK: petición preflight procesada correctamente.
+*/
 package cors
 
 import (

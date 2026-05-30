@@ -4,7 +4,7 @@ package logger
 // Struct Options
 // ------------------------------------------------------------------------------------------------
 
-type Opts struct {
+type Options struct {
 	MinLevel Level
 	Format   Format
 }
@@ -47,10 +47,10 @@ const (
 // ------------------------------------------------------------------------------------------------
 
 type Logger struct {
-	opts Opts
+	opts Options
 }
 
-func NewLogger(opts Opts) (*Logger, error) {
+func New(opts Options) (*Logger, error) {
 	if opts.Format != FormatJSON && opts.Format != FormatText {
 		opts.Format = FormatJSON
 	}

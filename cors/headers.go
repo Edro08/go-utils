@@ -1,7 +1,6 @@
 package cors
 
 import (
-	"encoding/json"
 	"net/http"
 	"strconv"
 	"strings"
@@ -9,6 +8,9 @@ import (
 
 // setAllowMethodsHeader: Set the allow methods header
 func (c *Options) setAllowMethodsHeader(w http.ResponseWriter) {
+	if len(c.AllowedMethods) == 0 {
+		return
+	}
 	w.Header().Set(allowMethodsHeader, strings.Join(c.AllowedMethods, ", "))
 }
 
@@ -55,25 +57,25 @@ func (c *Options) setMaxAgeHeader(w http.ResponseWriter) {
 func (c *Options) setAllowOriginHeader(w http.ResponseWriter, origin string) bool {
 	allowedOrigin, ok := isMatch(origin, c.AllowedOrigins)
 	if !ok {
-		// If not allowed, send Forbidden and response JSON
-		w.Header().Set(allowOriginHeader, strings.Join(c.AllowedOrigins, ", "))
 		w.WriteHeader(http.StatusForbidden)
-		_ = json.NewEncoder(w).Encode(Cors{Message: MsgStatusForbidden})
 		return false
 	}
 
 	w.Header().Set(allowOriginHeader, allowedOrigin)
+
+	if allowedOrigin != Default {
+		w.Header().Add("Vary", "Origin")
+	}
+
 	return true
 }
 
 // handlePreflightMethod: Handle OPTIONS preflight method check
 func (c *Options) handlePreflightMethod(w http.ResponseWriter, method string) {
 	if _, ok := isMatch(method, c.AllowedMethods); ok {
-		w.WriteHeader(http.StatusOK)
-		_ = json.NewEncoder(w).Encode(Cors{Message: MsgStatusOK})
+		w.WriteHeader(http.StatusNoContent)
 	} else {
 		w.WriteHeader(http.StatusMethodNotAllowed)
-		_ = json.NewEncoder(w).Encode(Cors{Message: MsgStatusMethodNotAllowed})
 	}
 }
 

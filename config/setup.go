@@ -2,48 +2,90 @@ package config
 
 import (
 	"fmt"
-	"gopkg.in/yaml.v3"
 	"os"
-)
+	"sync"
 
-// ------------------------------------------------------------------------------------------------
-// Struct Options
-// ------------------------------------------------------------------------------------------------
+	"gopkg.in/yaml.v3"
+)
 
 const (
 	defaultSeparator = "."
 )
 
-type Opts struct {
-	File      string
+type Options struct {
 	Separator string
 }
 
-// ------------------------------------------------------------------------------------------------
-// NewConfig
-// ------------------------------------------------------------------------------------------------
-
 type Config struct {
 	data map[string]interface{}
-	opts Opts
+	opts Options
+	mu   sync.RWMutex
 }
 
-func NewConfig(opts Opts) (*Config, error) {
-	yamlFile, err := os.ReadFile(opts.File)
-	if err != nil {
-		return nil, fmt.Errorf("error leyendo archivo YAML: %w", err)
-	}
-
-	var data map[string]interface{}
-
-	err = yaml.Unmarshal(yamlFile, &data)
-	if err != nil {
-		return nil, fmt.Errorf("error unmarshalling YAML: %w", err)
-	}
-
+func New(opts Options) *Config {
 	if opts.Separator == "" {
 		opts.Separator = defaultSeparator
 	}
+	return &Config{
+		data: make(map[string]interface{}),
+		opts: opts,
+	}
+}
 
-	return &Config{data: data, opts: opts}, nil
+func (c *Config) LoadFile(path string) error {
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return fmt.Errorf("%w: %v", ErrReadFile, err)
+	}
+
+	m, err := unmarshalToMap(data)
+	if err != nil {
+		return err
+	}
+
+	c.mu.Lock()
+	defer c.mu.Unlock()
+
+	deepMerge(c.data, m)
+	return nil
+}
+
+func (c *Config) LoadStruct(s interface{}) error {
+	data, err := yaml.Marshal(s)
+	if err != nil {
+		return fmt.Errorf("%w: %v", ErrMarshalStruct, err)
+	}
+
+	m, err := unmarshalToMap(data)
+	if err != nil {
+		return err
+	}
+
+	c.mu.Lock()
+	defer c.mu.Unlock()
+
+	deepMerge(c.data, m)
+	return nil
+}
+
+func deepMerge(dst, src map[string]interface{}) {
+	for k, srcVal := range src {
+		if dstVal, exists := dst[k]; exists {
+			srcMap, srcIsMap := srcVal.(map[string]interface{})
+			dstMap, dstIsMap := dstVal.(map[string]interface{})
+			if srcIsMap && dstIsMap {
+				deepMerge(dstMap, srcMap)
+				continue
+			}
+		}
+		dst[k] = srcVal
+	}
+}
+
+func unmarshalToMap(data []byte) (map[string]interface{}, error) {
+	var m map[string]interface{}
+	if err := yaml.Unmarshal(data, &m); err != nil {
+		return nil, fmt.Errorf("%w: %v", ErrParseYAML, err)
+	}
+	return m, nil
 }

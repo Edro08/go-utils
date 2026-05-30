@@ -1,17 +1,22 @@
-package config
+package test
 
 import (
-	"github.com/edro08/go-utils/config"
 	"reflect"
 	"testing"
+
+	"github.com/edro08/go-utils/config"
 )
 
-func TestConfig_KeyEmpty(t *testing.T) {
-	opts := config.Opts{
-		File: "app.yaml",
-	}
+type testCfg struct {
+	Server struct {
+		Port int    `yaml:"port"`
+		Name string `yaml:"name"`
+	} `yaml:"server"`
+}
 
-	cfg, err := config.NewConfig(opts)
+func TestConfig_KeyEmpty(t *testing.T) {
+	cfg := config.New(config.Options{})
+	err := cfg.LoadStruct(&testCfg{})
 	if err != nil {
 		t.Fatal(err)
 	}

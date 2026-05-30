@@ -2,57 +2,36 @@
 Package cors provee un middleware para manejar CORS (Cross-Origin Resource Sharing)
 en aplicaciones web escritas en Go.
 
-Este paquete facilita la configuración de políticas CORS como:
-- Orígenes permitidos
-- Métodos HTTP permitidos
-- Cabeceras permitidas y expuestas
-- Credenciales
-- Tiempo de caché para preflight requests
-
 Uso básico:
 
 	options := cors.Options{
 	    AllowedOrigins:   []string{"https://example.com"},
 	    AllowedMethods:   []string{"GET", "POST", "OPTIONS"},
 	    AllowedHeaders:   []string{"Content-Type", "Authorization"},
-	    ExposedHeaders:   []string{"X-Custom-Header"},
 	    AllowCredentials: true,
 	    MaxAge:           3600,
-	    Connection:       "keep-alive",
 	}
 
-	corsHandler := cors.NewCorsHandler(options)
+	c := cors.NewCors(options)
 
-	http.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
-	    corsHandler.CorsHandler(w, r)
-	    // lógica adicional para manejar la petición
-	})
+	http.ListenAndServe(":8080", c.Middleware(mux))
 
 Estructuras y funciones principales:
 
-  - type Options: configuración principal para CORS, incluye listas de orígenes, métodos,
-    cabeceras permitidas y otros parámetros.
+  - type Options: configuración de políticas CORS (orígenes, métodos, cabeceras).
 
-- func NewCors(option Options) *Options: constructor para crear un handler CORS configurado.
+  - func NewCors(option Options) *Options: constructor.
 
-  - func (c *Options) CorsHandler(w http.ResponseWriter, r *http.Request):
-    maneja la respuesta CORS agregando los headers necesarios según la configuración
-    y el request recibido.
+  - func (c *Options) Middleware(next http.Handler) http.Handler:
+    envuelve un handler HTTP y maneja CORS automáticamente. Si el origen no está
+    permitido, retorna 403. Si es una petición preflight (OPTIONS), valida el
+    método y retorna 204; en caso contrario, delega al siguiente handler.
 
-  - Métodos auxiliares para establecer cada header CORS:
-    setAllowMethodsHeader, setAllowHeadersHeader, setAllowOriginHeader, etc.
-
-  - Función interna isMatch(target string, values []string) (string, bool):
-    verifica si un valor está contenido en una lista (ignorando mayúsculas/minúsculas)
-    y permite la presencia del valor wildcard "*".
-
-- Función splitAndTrim(input string) []string: ayuda a procesar cabeceras separadas por coma.
-
-Mensajes de estado para respuesta JSON:
-
-  - MsgStatusForbidden: acceso denegado cuando el origen no está permitido.
-  - MsgStatusMethodNotAllowed: método HTTP no permitido.
-  - MsgStatusOK: petición preflight procesada correctamente.
+Comportamiento:
+  - Sin header Origin: pasa al siguiente handler sin modificar la respuesta.
+  - Origen no permitido: retorna 403 Forbidden.
+  - OPTIONS permitido: retorna 204 No Content.
+  - OPTIONS denegado: retorna 405 Method Not Allowed.
 */
 package cors
 
@@ -61,7 +40,7 @@ import (
 )
 
 type ICors interface {
-	CorsHandler(w http.ResponseWriter, r *http.Request)
+	Middleware(next http.Handler) http.Handler
 }
 
 const (
@@ -102,25 +81,35 @@ func NewCors(option Options) *Options {
 	return &option
 }
 
-func (c *Options) CorsHandler(w http.ResponseWriter, r *http.Request) {
-	// Set all standard CORS headers
-	c.setAllowMethodsHeader(w)
-	c.setConnectionHeader(w)
-	c.setExposeHeadersHeader(w)
-	c.setAllowHeadersHeader(w, r.Header.Get(requestHeaders))
-	c.setAllowCredentialsHeader(w)
-	c.setMaxAgeHeader(w)
+func (c *Options) Middleware(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		origin := r.Header.Get(originHeader)
+		if origin == "" {
+			next.ServeHTTP(w, r)
+			return
+		}
 
-	// Validate and set Allow-Origin header, block if not allowed
-	if !c.setAllowOriginHeader(w, r.Header.Get(originHeader)) {
-		return
-	}
+		isPreflight := r.Method == http.MethodOptions
 
-	// If it is not a preflight OPTIONS request, just return (normal request)
-	if r.Method != http.MethodOptions {
-		return
-	}
+		c.setConnectionHeader(w)
+		c.setExposeHeadersHeader(w)
+		c.setAllowCredentialsHeader(w)
 
-	// Handle preflight OPTIONS request method validation
-	c.handlePreflightMethod(w, r.Header.Get(requestMethod))
+		if isPreflight {
+			c.setAllowMethodsHeader(w)
+			c.setAllowHeadersHeader(w, r.Header.Get(requestHeaders))
+			c.setMaxAgeHeader(w)
+		}
+
+		if !c.setAllowOriginHeader(w, origin) {
+			return
+		}
+
+		if isPreflight {
+			c.handlePreflightMethod(w, r.Header.Get(requestMethod))
+			return
+		}
+
+		next.ServeHTTP(w, r)
+	})
 }

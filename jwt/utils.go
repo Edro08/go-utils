@@ -2,10 +2,18 @@ package jwt
 
 import (
 	"crypto/rsa"
+	"errors"
 	"fmt"
 	"os"
 
 	"github.com/golang-jwt/jwt/v5"
+)
+
+var (
+	ErrPrivateKeyNotFound = errors.New("private key not found")
+	ErrPublicKeyNotFound  = errors.New("public key not found")
+	ErrParsePrivateKey    = errors.New("failed to parse private key")
+	ErrParsePublicKey     = errors.New("failed to parse public key")
 )
 
 func ParseRSAPrivateKeyFromPEMFile(path string) (*rsa.PrivateKey, error) {

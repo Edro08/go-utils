@@ -1,11 +1,20 @@
 package config
 
 import (
+	"errors"
 	"fmt"
 	"os"
 	"sync"
 
 	"gopkg.in/yaml.v3"
+)
+
+var (
+	ErrKeyEmpty      = errors.New("key cannot be empty")
+	ErrReadFile      = errors.New("failed to read config file")
+	ErrMarshalStruct = errors.New("failed to marshal struct")
+	ErrParseYAML     = errors.New("failed to parse YAML")
+	ErrMapKeyType    = errors.New("map key must be string")
 )
 
 const (

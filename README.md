@@ -58,19 +58,27 @@ import (
 
 ```go
 opts := logger.Options{
-	MinLevel: logger.DEBUG,
-	Format:   logger.FormatText,
+	MinLevel:   logger.DEBUG,
+	Format:     logger.FormatText,
+	EnableFile: true,     // Opcional: activa guardado en archivo además de consola
+	FilePath:   "./logs", // Opcional: ruta de la carpeta (genera ./logs/app_YYYYMMDDTHHMMSS_000000.log)
 }
 
 log, _ := logger.New(opts)
 ```
 
-- ***Opcional:*** Agregar un nuevo log
-
+- ***Opcional:*** Agregar un nuevo log y utilizar contexto / grupos
 ```go
 log.Info("Titulo", "key", "value")
 log.Debug("Mensaje debug", "modulo", "auth")
 log.Error("Error capturado", "err", err)
+
+// Logger contextual con atributos fijos o grupos (basado en log/slog)
+authLogger := log.With("modulo", "auth").WithGroup("http")
+authLogger.Info("Petición procesada", "status", 200)
+
+// Acceder directamente a la instancia *slog.Logger nativa
+stdSlog := log.Slog()
 ```
 
 ### 🧊 CORS

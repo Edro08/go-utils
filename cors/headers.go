@@ -2,117 +2,100 @@ package cors
 
 import (
 	"net/http"
-	"strconv"
 	"strings"
 )
 
-// setAllowMethodsHeader: Set the allow methods header
-func (c *Options) setAllowMethodsHeader(w http.ResponseWriter) {
-	if len(c.AllowedMethods) == 0 {
+// setAllowMethodsHeader establece Access-Control-Allow-Methods.
+func (c *Cors) setAllowMethodsHeader(w http.ResponseWriter) {
+	if c.formattedMethods == "" {
 		return
 	}
-	w.Header().Set(allowMethodsHeader, strings.Join(c.AllowedMethods, ", "))
+
+	w.Header().Set(allowMethodsHeader, c.formattedMethods)
 }
 
-// setAllowCredentialsHeader: Set the allow credentials header
-func (c *Options) setConnectionHeader(w http.ResponseWriter) {
-	if c.Connection != "" {
-		w.Header().Set(connection, c.Connection)
+// setExposeHeadersHeader establece Access-Control-Expose-Headers.
+func (c *Cors) setExposeHeadersHeader(w http.ResponseWriter) {
+	if c.formattedExposed == "" {
+		return
+	}
+
+	w.Header().Set(exposeHeadersHeader, c.formattedExposed)
+}
+
+// setAllowHeadersHeader establece Access-Control-Allow-Headers.
+func (c *Cors) setAllowHeadersHeader(w http.ResponseWriter, requestedHeaders []string) {
+	if c.hasWildcardHeader {
+		if len(requestedHeaders) > 0 {
+			w.Header().Set(allowHeadersHeader, strings.Join(requestedHeaders, ", "))
+		} else {
+			w.Header().Set(allowHeadersHeader, Default)
+		}
+		return
+	}
+
+	if c.formattedHeaders != "" {
+		w.Header().Set(allowHeadersHeader, c.formattedHeaders)
 	}
 }
 
-// setMaxAgeHeader: Set the max age header
-func (c *Options) setExposeHeadersHeader(w http.ResponseWriter) {
-	if len(c.ExposedHeaders) > 0 {
-		w.Header().Set(exposeHeaders, strings.Join(c.ExposedHeaders, ", "))
-	}
-}
-
-// setAllowHeadersHeader: Set the allow headers header
-func (c *Options) setAllowHeadersHeader(w http.ResponseWriter, requestHeaders string) {
-	allowedHeaders := c.AllowedHeaders
-	if isDefaultAllowed(allowedHeaders) && requestHeaders != "" {
-		allowedHeaders = splitAndTrim(requestHeaders)
-	}
-	if len(allowedHeaders) > 0 {
-		w.Header().Set(allowHeadersHeader, strings.Join(allowedHeaders, ", "))
-	}
-}
-
-// setAllowCredentialsHeader: Set the allow credentials header if it is true
-func (c *Options) setAllowCredentialsHeader(w http.ResponseWriter) {
-	if c.AllowCredentials {
+// setAllowCredentialsHeader establece Access-Control-Allow-Credentials.
+func (c *Cors) setAllowCredentialsHeader(w http.ResponseWriter) {
+	if c.options.AllowCredentials {
 		w.Header().Set(allowCredentialsHeader, "true")
 	}
 }
 
-// setMaxAgeHeader: Set the max age header if it is greater than 0
-func (c *Options) setMaxAgeHeader(w http.ResponseWriter) {
-	if c.MaxAge > 0 {
-		w.Header().Set(maxAgeHeader, strconv.Itoa(c.MaxAge))
+// setMaxAgeHeader establece Access-Control-Max-Age.
+func (c *Cors) setMaxAgeHeader(w http.ResponseWriter) {
+	if c.formattedMaxAge == "" {
+		return
+	}
+
+	w.Header().Set(maxAgeHeader, c.formattedMaxAge)
+}
+
+// setAllowOriginHeader establece Access-Control-Allow-Origin.
+func (c *Cors) setAllowOriginHeader(
+	w http.ResponseWriter,
+	origin string,
+) {
+	w.Header().Set(allowOriginHeader, origin)
+
+	if origin != Default {
+		addVary(w, originHeader)
 	}
 }
 
-// setAllowOriginHeader: Validate the origin against allowed origins and set the header
-func (c *Options) setAllowOriginHeader(w http.ResponseWriter, origin string) bool {
-	allowedOrigin, ok := isMatch(origin, c.AllowedOrigins)
-	if !ok {
-		w.WriteHeader(http.StatusForbidden)
-		return false
-	}
-
-	w.Header().Set(allowOriginHeader, allowedOrigin)
-
-	if allowedOrigin != Default {
-		w.Header().Add("Vary", "Origin")
-	}
-
-	return true
+// setPreflightVaryHeaders indica que la respuesta de preflight depende
+// de los valores utilizados para determinar la política CORS.
+func (c *Cors) setPreflightVaryHeaders(w http.ResponseWriter) {
+	addVary(w, originHeader)
+	addVary(w, requestMethod)
+	addVary(w, requestHeaders)
 }
 
-// handlePreflightMethod: Handle OPTIONS preflight method check
-func (c *Options) handlePreflightMethod(w http.ResponseWriter, method string) {
-	if _, ok := isMatch(method, c.AllowedMethods); ok {
-		w.WriteHeader(http.StatusNoContent)
-	} else {
-		w.WriteHeader(http.StatusMethodNotAllowed)
-	}
+// addVary agrega un valor al header Vary sin sobrescribir valores existentes.
+func addVary(w http.ResponseWriter, value string) {
+	w.Header().Add("Vary", value)
 }
 
-// isMatch verifica si el target está contenido en la lista values.
-// Primero busca una coincidencia exacta (ignorando mayúsculas/minúsculas).
-// Solo si no encuentra ninguna coincidencia, busca si existe el valor Default ("*").
-// Esto permite que el origen permitido sea explícito y evita usar el wildcard
-// Default cuando hay coincidencias específicas, lo que es importante para el manejo correcto
-// de las cabeceras CORS, especialmente para 'Allow-Credentials'.
-func isMatch(target string, values []string) (string, bool) {
-	// Buscar coincidencia exacta primero
-	for _, v := range values {
-		if strings.EqualFold(v, target) {
-			return v, true
-		}
-	}
-
-	// Si no hay coincidencia, buscar Default "*"
-	for _, v := range values {
-		if strings.EqualFold(v, Default) {
-			return v, true
-		}
-	}
-
-	return "", false
-}
-
-// isDefaultAllowed: Check if the AllowedHeaders contain only the Default wildcard "*"
-func isDefaultAllowed(headers []string) bool {
-	return len(headers) == 1 && headers[0] == Default
-}
-
-// splitAndTrim: Split string by comma and trim spaces
+// splitAndTrim separa una lista de valores delimitada por comas,
+// eliminando espacios y entradas vacías.
 func splitAndTrim(input string) []string {
-	parts := strings.Split(input, ",")
-	for i := range parts {
-		parts[i] = strings.TrimSpace(parts[i])
+	if strings.TrimSpace(input) == "" {
+		return nil
 	}
-	return parts
+
+	parts := strings.Split(input, ",")
+	result := make([]string, 0, len(parts))
+
+	for _, part := range parts {
+		part = strings.TrimSpace(part)
+		if part != "" {
+			result = append(result, part)
+		}
+	}
+
+	return result
 }

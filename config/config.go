@@ -51,7 +51,7 @@ func (c *Config) Get(keys string) interface{} {
 func (c *Config) GetString(keys string) string {
 	c.mu.RLock()         // Bloqueo de lectura
 	defer c.mu.RUnlock() // Liberar al salir
-	if v, ok := c.getRawValue(keys); ok {
+	if v, ok := c.findValue(keys); ok {
 		return toString(v)
 	}
 	return ""
@@ -62,7 +62,7 @@ func (c *Config) GetString(keys string) string {
 func (c *Config) GetInt(keys string) int {
 	c.mu.RLock()         // Bloqueo de lectura
 	defer c.mu.RUnlock() // Liberar al salir
-	if v, ok := c.getRawValue(keys); ok {
+	if v, ok := c.findValue(keys); ok {
 		return toInt(v)
 	}
 	return 0
@@ -73,7 +73,7 @@ func (c *Config) GetInt(keys string) int {
 func (c *Config) GetFloat(keys string) float64 {
 	c.mu.RLock()         // Bloqueo de lectura
 	defer c.mu.RUnlock() // Liberar al salir
-	if v, ok := c.getRawValue(keys); ok {
+	if v, ok := c.findValue(keys); ok {
 		return toFloat64(v)
 	}
 	return 0.0
@@ -84,7 +84,7 @@ func (c *Config) GetFloat(keys string) float64 {
 func (c *Config) GetBool(keys string) bool {
 	c.mu.RLock()         // Bloqueo de lectura
 	defer c.mu.RUnlock() // Liberar al salir
-	if v, ok := c.getRawValue(keys); ok {
+	if v, ok := c.findValue(keys); ok {
 		return toBool(v)
 	}
 	return false
@@ -95,19 +95,19 @@ func (c *Config) GetBool(keys string) bool {
 func (c *Config) GetMap(keys string) map[string]interface{} {
 	c.mu.RLock()         // Bloqueo de lectura
 	defer c.mu.RUnlock() // Liberar al salir
-	if m, ok := c.getRawMap(keys); ok {
+	if m, ok := c.getMap(keys); ok {
 		// Al ser un mapa genérico mutable, lo clonamos antes de entregarlo
-		return cloneValue(m).(map[string]interface{})
+		return m
 	}
 	return map[string]interface{}{}
 }
 
-// GetMapString convierte y retorna un map[string]string a partir de la referencia original.
+// GetMapString convierte y retorna un map[string]string.
 // Si la clave no existe o no es convertible, retorna un mapa vacío.
 func (c *Config) GetMapString(keys string) map[string]string {
 	c.mu.RLock()         // Bloqueo de lectura
 	defer c.mu.RUnlock() // Liberar al salir
-	if m, ok := c.getRawMap(keys); ok {
+	if m, ok := c.getMap(keys); ok {
 		if r, ok := convertToStringMap(m); ok {
 			return r
 		}
@@ -115,12 +115,12 @@ func (c *Config) GetMapString(keys string) map[string]string {
 	return map[string]string{}
 }
 
-// GetMapInt convierte y retorna un map[string]int a partir de la referencia original.
+// GetMapInt convierte y retorna un map[string]int.
 // Si la clave no existe o no es convertible, retorna un mapa vacío.
 func (c *Config) GetMapInt(keys string) map[string]int {
 	c.mu.RLock()         // Bloqueo de lectura
 	defer c.mu.RUnlock() // Liberar al salir
-	if m, ok := c.getRawMap(keys); ok {
+	if m, ok := c.getMap(keys); ok {
 		if r, ok := convertToIntMap(m); ok {
 			return r
 		}
@@ -128,12 +128,12 @@ func (c *Config) GetMapInt(keys string) map[string]int {
 	return map[string]int{}
 }
 
-// GetMapFloat convierte y retorna un map[string]float64 a partir de la referencia original.
+// GetMapFloat convierte y retorna un map[string]float64.
 // Si la clave no existe o no es convertible, retorna un mapa vacío.
 func (c *Config) GetMapFloat(keys string) map[string]float64 {
 	c.mu.RLock()         // Bloqueo de lectura
 	defer c.mu.RUnlock() // Liberar al salir
-	if m, ok := c.getRawMap(keys); ok {
+	if m, ok := c.getMap(keys); ok {
 		if r, ok := convertToFloatMap(m); ok {
 			return r
 		}
@@ -141,12 +141,12 @@ func (c *Config) GetMapFloat(keys string) map[string]float64 {
 	return map[string]float64{}
 }
 
-// GetMapBool convierte y retorna un map[string]bool a partir de la referencia original.
+// GetMapBool convierte y retorna un map[string]bool.
 // Si la clave no existe o no es convertible, retorna un mapa vacío.
 func (c *Config) GetMapBool(keys string) map[string]bool {
 	c.mu.RLock()         // Bloqueo de lectura
 	defer c.mu.RUnlock() // Liberar al salir
-	if m, ok := c.getRawMap(keys); ok {
+	if m, ok := c.getMap(keys); ok {
 		if r, ok := convertToBoolMap(m); ok {
 			return r
 		}
@@ -159,19 +159,19 @@ func (c *Config) GetMapBool(keys string) map[string]bool {
 func (c *Config) GetSlice(keys string) []interface{} {
 	c.mu.RLock()         // Bloqueo de lectura
 	defer c.mu.RUnlock() // Liberar al salir
-	if s, ok := c.getRawSlice(keys); ok {
+	if s, ok := c.getSlice(keys); ok {
 		// Al ser un slice genérico mutable, lo clonamos antes de entregarlo
-		return cloneValue(s).([]interface{})
+		return s
 	}
 	return []interface{}{}
 }
 
-// GetSliceString convierte y retorna un []string a partir de la referencia original.
+// GetSliceString convierte y retorna un []string.
 // Si la clave no existe o no es convertible, retorna un slice vacío.
 func (c *Config) GetSliceString(keys string) []string {
 	c.mu.RLock()         // Bloqueo de lectura
 	defer c.mu.RUnlock() // Liberar al salir
-	if s, ok := c.getRawSlice(keys); ok {
+	if s, ok := c.getSlice(keys); ok {
 		if r, ok := convertToStringSlice(s); ok {
 			return r
 		}
@@ -179,12 +179,12 @@ func (c *Config) GetSliceString(keys string) []string {
 	return []string{}
 }
 
-// GetSliceInt convierte y retorna un []int a partir de la referencia original.
+// GetSliceInt convierte y retorna un []int.
 // Si la clave no existe o no es convertible, retorna un slice vacío.
 func (c *Config) GetSliceInt(keys string) []int {
 	c.mu.RLock()         // Bloqueo de lectura
 	defer c.mu.RUnlock() // Liberar al salir
-	if s, ok := c.getRawSlice(keys); ok {
+	if s, ok := c.getSlice(keys); ok {
 		if r, ok := convertToIntSlice(s); ok {
 			return r
 		}
@@ -197,7 +197,7 @@ func (c *Config) GetSliceInt(keys string) []int {
 func (c *Config) GetSliceFloat(keys string) []float64 {
 	c.mu.RLock()         // Bloqueo de lectura
 	defer c.mu.RUnlock() // Liberar al salir
-	if s, ok := c.getRawSlice(keys); ok {
+	if s, ok := c.getSlice(keys); ok {
 		if r, ok := convertToFloatSlice(s); ok {
 			return r
 		}
@@ -210,7 +210,7 @@ func (c *Config) GetSliceFloat(keys string) []float64 {
 func (c *Config) GetSliceBool(keys string) []bool {
 	c.mu.RLock()         // Bloqueo de lectura
 	defer c.mu.RUnlock() // Liberar al salir
-	if s, ok := c.getRawSlice(keys); ok {
+	if s, ok := c.getSlice(keys); ok {
 		if r, ok := convertToBoolSlice(s); ok {
 			return r
 		}
@@ -224,16 +224,16 @@ func (c *Config) HasKey(key string, valueType ValueType) bool {
 	c.mu.RLock()         // Bloqueo de lectura
 	defer c.mu.RUnlock() // Liberar al salir
 	if valueType == "" {
-		_, ok := c.getRawValue(key)
+		_, ok := c.findValue(key)
 		return ok
 	}
 
 	switch valueType {
 	case Map:
-		_, ok := c.getRawMap(key)
+		_, ok := c.getMap(key)
 		return ok
 	case Slice:
-		_, ok := c.getRawSlice(key)
+		_, ok := c.getSlice(key)
 		return ok
 	default:
 		return false
@@ -245,7 +245,7 @@ func (c *Config) HasKey(key string, valueType ValueType) bool {
 func (c *Config) GetKeys(keys string) []string {
 	c.mu.RLock()         // Bloqueo de lectura
 	defer c.mu.RUnlock() // Liberar al salir
-	m, ok := c.getRawMap(keys)
+	m, ok := c.getMap(keys)
 	if !ok {
 		return []string{}
 	}

@@ -1,8 +1,10 @@
 package config
 
 import (
+	"bytes"
 	"reflect"
 	"testing"
+	"time"
 )
 
 func TestConfig_findValue(t *testing.T) {
@@ -990,5 +992,33 @@ func Test_toString(t *testing.T) {
 				t.Errorf("toString() = %v, want %v", got, tt.want)
 			}
 		})
+	}
+}
+
+func TestConfig_BytesAndDurationValues(t *testing.T) {
+	cfg := New(Options{})
+	rawSecret := []byte("super-secret-key")
+	if err := cfg.Set("crypto.key", rawSecret); err != nil {
+		t.Fatalf("Set([]byte) error: %v", err)
+	}
+	rawSecret[0] = 'X'
+
+	gotBytes, ok := cfg.Get("crypto.key").([]byte)
+	if !ok || !bytes.Equal(gotBytes, []byte("super-secret-key")) {
+		t.Fatalf("Get([]byte) = %v (%T), want preserved []byte", gotBytes, cfg.Get("crypto.key"))
+	}
+	gotBytes[0] = 'Z'
+	if cfg.GetString("crypto.key") != "super-secret-key" {
+		t.Errorf("GetString([]byte) = %q, want super-secret-key", cfg.GetString("crypto.key"))
+	}
+
+	if err := cfg.Set("runtime.timeout", 250*time.Millisecond); err != nil {
+		t.Fatalf("Set(time.Duration) error: %v", err)
+	}
+	if got := cfg.GetDuration("runtime.timeout"); got != 250*time.Millisecond {
+		t.Errorf("GetDuration = %v, want 250ms", got)
+	}
+	if got := cfg.GetString("runtime.timeout"); got != "250ms" {
+		t.Errorf("GetString(time.Duration) = %q, want 250ms", got)
 	}
 }

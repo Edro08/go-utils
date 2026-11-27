@@ -1,9 +1,11 @@
 package config
 
 import (
+	"errors"
 	"reflect"
 	"sort"
 	"testing"
+	"time"
 )
 
 func TestConfig_Get(t *testing.T) {
@@ -1133,5 +1135,143 @@ func TestConfig_Set(t *testing.T) {
 				}
 			}
 		})
+	}
+}
+
+func TestConfig_DefaultsDurationAndRootKeys(t *testing.T) {
+	cfg := New(Options{})
+	_ = cfg.LoadBytes([]byte(`
+server:
+  host: "0.0.0.0"
+  port: 8080
+  rate: 1.5
+  tls: false
+  readTimeout: "5s"
+  badInt: "abc"
+  badBool: "not-bool"
+  badFloat: "xyz"
+  badDuration: "invalid"
+`))
+
+	if got := cfg.GetStringOr("server.host", "127.0.0.1"); got != "0.0.0.0" {
+		t.Errorf("GetStringOr existing = %q, want 0.0.0.0", got)
+	}
+	if got := cfg.GetStringOr("server.missing", "127.0.0.1"); got != "127.0.0.1" {
+		t.Errorf("GetStringOr missing = %q, want 127.0.0.1", got)
+	}
+
+	if got := cfg.GetIntOr("server.port", 3000); got != 8080 {
+		t.Errorf("GetIntOr existing = %d, want 8080", got)
+	}
+	if got := cfg.GetIntOr("server.badInt", 3000); got != 3000 {
+		t.Errorf("GetIntOr invalid = %d, want 3000", got)
+	}
+	if got := cfg.GetIntOr("server.missing", 3000); got != 3000 {
+		t.Errorf("GetIntOr missing = %d, want 3000", got)
+	}
+
+	if got := cfg.GetFloatOr("server.rate", 9.9); got != 1.5 {
+		t.Errorf("GetFloatOr existing = %v, want 1.5", got)
+	}
+	if got := cfg.GetFloatOr("server.badFloat", 9.9); got != 9.9 {
+		t.Errorf("GetFloatOr invalid = %v, want 9.9", got)
+	}
+
+	if got := cfg.GetBoolOr("server.tls", true); got != false {
+		t.Errorf("GetBoolOr explicit false = %v, want false", got)
+	}
+	if got := cfg.GetBoolOr("server.badBool", true); got != true {
+		t.Errorf("GetBoolOr invalid = %v, want true", got)
+	}
+	if got := cfg.GetBoolOr("server.missingBool", true); got != true {
+		t.Errorf("GetBoolOr missing = %v, want true", got)
+	}
+
+	if got := cfg.GetDuration("server.readTimeout"); got != 5*time.Second {
+		t.Errorf("GetDuration = %v, want 5s", got)
+	}
+	if got := cfg.GetDuration("server.badDuration"); got != 0 {
+		t.Errorf("GetDuration invalid = %v, want 0", got)
+	}
+	if got := cfg.GetDurationOr("server.badDuration", 15*time.Second); got != 15*time.Second {
+		t.Errorf("GetDurationOr invalid = %v, want 15s", got)
+	}
+	if got := cfg.GetDurationOr("server.missingDuration", 10*time.Second); got != 10*time.Second {
+		t.Errorf("GetDurationOr missing = %v, want 10s", got)
+	}
+
+	rootKeys := cfg.GetKeys("")
+	sort.Strings(rootKeys)
+	if !reflect.DeepEqual(rootKeys, []string{"server"}) {
+		t.Errorf("GetKeys(\"\") = %v, want [server]", rootKeys)
+	}
+}
+
+func TestConfig_AutomaticEnvAndUnmarshal(t *testing.T) {
+	t.Setenv("APP_SERVER_PORT", "9090")
+	t.Setenv("APP_SERVER_READ_TIMEOUT", "12s")
+	t.Setenv("APP_CORS_ORIGINS", "https://a.example.com, https://b.example.com")
+	t.Setenv("APP_DYNAMIC_FLAG", "true")
+
+	cfg := New(Options{
+		AutomaticEnv: true,
+		EnvPrefix:    "APP",
+	})
+	err := cfg.LoadBytes([]byte(`
+server:
+  host: "localhost"
+  port: 8080
+  read-timeout: "5s"
+cors:
+  origins:
+    - "http://localhost:3000"
+`))
+	if err != nil {
+		t.Fatalf("LoadBytes error: %v", err)
+	}
+
+	if got := cfg.GetInt("server.port"); got != 9090 {
+		t.Errorf("AutomaticEnv GetInt(server.port) = %d, want 9090", got)
+	}
+	if got := cfg.GetDuration("server.read-timeout"); got != 12*time.Second {
+		t.Errorf("AutomaticEnv GetDuration(server.read-timeout) = %v, want 12s", got)
+	}
+	if !cfg.Has("dynamic.flag") || !cfg.GetBool("dynamic.flag") {
+		t.Error("expected dynamic.flag from env to exist and be true")
+	}
+
+	origins := cfg.GetSliceString("cors.origins")
+	wantOrigins := []string{"https://a.example.com", "https://b.example.com"}
+	if !reflect.DeepEqual(origins, wantOrigins) {
+		t.Errorf("AutomaticEnv GetSliceString = %v, want %v", origins, wantOrigins)
+	}
+
+	type ServerCfg struct {
+		Host        string `yaml:"host"`
+		Port        int    `yaml:"port"`
+		ReadTimeout string `yaml:"read-timeout"`
+	}
+	var srv ServerCfg
+	if err := cfg.Unmarshal("server", &srv); err != nil {
+		t.Fatalf("Unmarshal(server) error: %v", err)
+	}
+	if srv.Host != "localhost" || srv.Port != 9090 || srv.ReadTimeout != "12s" {
+		t.Errorf("Unmarshal with env overrides got %+v", srv)
+	}
+
+	var full map[string]interface{}
+	if err := cfg.Unmarshal("", &full); err != nil || len(full) == 0 {
+		t.Errorf("Unmarshal root error = %v, full = %v", err, full)
+	}
+
+	if err := cfg.Unmarshal("server", nil); !errors.Is(err, ErrInvalidTarget) {
+		t.Errorf("Unmarshal nil error = %v, want ErrInvalidTarget", err)
+	}
+	var nonPtr ServerCfg
+	if err := cfg.Unmarshal("server", nonPtr); !errors.Is(err, ErrInvalidTarget) {
+		t.Errorf("Unmarshal non-pointer error = %v, want ErrInvalidTarget", err)
+	}
+	if err := cfg.Unmarshal("non.existent", &srv); !errors.Is(err, ErrKeyNotFound) {
+		t.Errorf("Unmarshal missing key error = %v, want ErrKeyNotFound", err)
 	}
 }

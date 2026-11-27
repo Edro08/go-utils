@@ -2,25 +2,24 @@ package logger
 
 import (
 	"bytes"
+	"context"
 	"log/slog"
-	"os"
-	"os/exec"
 	"strings"
 	"testing"
 )
 
+type ctxKey string
+
+const traceKey ctxKey = "trace_id"
+
 func newTestLogger(minLevel Level) (*Logger, *bytes.Buffer) {
 	buf := &bytes.Buffer{}
-	h := slog.NewTextHandler(buf, &slog.HandlerOptions{
-		Level: minLevel.ToSlog(),
+	l, _ := New(Options{
+		MinLevel: minLevel,
+		Format:   FormatText,
+		Writer:   buf,
 	})
-	return &Logger{
-		opts: Options{
-			MinLevel: minLevel,
-			Format:   FormatText,
-		},
-		slog: slog.New(h),
-	}, buf
+	return l, buf
 }
 
 func TestLevel_ToSlog(t *testing.T) {
@@ -45,12 +44,12 @@ func TestLevel_ToSlog(t *testing.T) {
 	}
 }
 
-func TestLogger_Debug(t *testing.T) {
+func TestLogger_Levels(t *testing.T) {
 	t.Run("Debug written when level enabled", func(t *testing.T) {
 		l, buf := newTestLogger(DEBUG)
 		l.Debug("DEBUG_EVENT", "key1", "val1")
 		if !strings.Contains(buf.String(), "DEBUG_EVENT") || !strings.Contains(buf.String(), "key1=val1") {
-			t.Errorf("Debug() output = %q, expected to contain title and keys", buf.String())
+			t.Errorf("Debug() output = %q, expected title and keys", buf.String())
 		}
 	})
 
@@ -61,124 +60,155 @@ func TestLogger_Debug(t *testing.T) {
 			t.Errorf("Debug() wrote output when disabled: %q", buf.String())
 		}
 	})
+
+	t.Run("Info, Warn, Error", func(t *testing.T) {
+		l, buf := newTestLogger(INFO)
+		l.Info("SERVER_START", "port", 8080)
+		l.Warn("CACHE_MISS", "key", "user:123")
+		l.Error("DB_CONNECTION_FAILED", "host", "127.0.0.1")
+		out := buf.String()
+		for _, expected := range []string{"SERVER_START", "port=8080", "CACHE_MISS", "DB_CONNECTION_FAILED"} {
+			if !strings.Contains(out, expected) {
+				t.Errorf("output = %q, missing %q", out, expected)
+			}
+		}
+	})
+
+	t.Run("FATAL label replaces ERROR+4", func(t *testing.T) {
+		buf := &bytes.Buffer{}
+		l, _ := New(Options{
+			MinLevel: INFO,
+			Format:   FormatJSON,
+			Writer:   buf,
+		})
+		l.write(FATAL, "CRITICAL_TEST", "code", 500)
+		out := buf.String()
+		if !strings.Contains(out, `"level":"FATAL"`) {
+			t.Errorf("expected level=FATAL, got %q", out)
+		}
+		if strings.Contains(out, "ERROR+4") {
+			t.Errorf("unexpected ERROR+4 in output: %q", out)
+		}
+	})
 }
 
-func TestLogger_Info(t *testing.T) {
-	l, buf := newTestLogger(INFO)
-	l.Info("SERVER_START", "port", 8080)
+func TestLogger_AddSource(t *testing.T) {
+	t.Run("AddSource true includes trimmed short file path without host root", func(t *testing.T) {
+		buf := &bytes.Buffer{}
+		l, err := New(Options{
+			MinLevel:  INFO,
+			Format:    FormatJSON,
+			AddSource: true,
+			Writer:    buf,
+		})
+		if err != nil {
+			t.Fatalf("New() error: %v", err)
+		}
+		l.Info("SOURCE_CHECK")
+		out := buf.String()
+		if !strings.Contains(out, `"file":"logger/logger_test.go"`) {
+			t.Errorf("expected trimmed source file logger/logger_test.go, got %q", out)
+		}
+	})
+}
+
+func TestLogger_ContextMethods(t *testing.T) {
+	buf := &bytes.Buffer{}
+	l, err := New(Options{
+		MinLevel: DEBUG,
+		Format:   FormatText,
+		Writer:   buf,
+		ContextExtractor: func(ctx context.Context) []slog.Attr {
+			if v, ok := ctx.Value(traceKey).(string); ok && v != "" {
+				return []slog.Attr{slog.String("trace_id", v)}
+			}
+			return nil
+		},
+	})
+	if err != nil {
+		t.Fatalf("New() error: %v", err)
+	}
+
+	ctx := context.WithValue(context.Background(), traceKey, "tr-abc-123")
+	l.DebugCtx(ctx, "CTX_DEBUG")
+	l.InfoCtx(ctx, "CTX_INFO", "step", 1)
+	l.WarnCtx(ctx, "CTX_WARN")
+	l.ErrorCtx(nil, "CTX_NIL_SAFE")
+
 	out := buf.String()
-	if !strings.Contains(out, "SERVER_START") || !strings.Contains(out, "port=8080") {
-		t.Errorf("Info() output = %q, want title and key-values", out)
+	for _, expected := range []string{"CTX_DEBUG", "CTX_INFO", "CTX_WARN", "CTX_NIL_SAFE", "trace_id=tr-abc-123", "step=1"} {
+		if !strings.Contains(out, expected) {
+			t.Errorf("context output = %q, missing %q", out, expected)
+		}
 	}
 }
 
-func TestLogger_Warn(t *testing.T) {
-	l, buf := newTestLogger(WARN)
-	l.Warn("CACHE_MISS", "key", "user:123")
-	out := buf.String()
-	if !strings.Contains(out, "CACHE_MISS") || !strings.Contains(out, "key=user:123") {
-		t.Errorf("Warn() output = %q, want title and key-values", out)
-	}
-}
+func TestLogger_FatalAndFatalCtx(t *testing.T) {
+	t.Run("Fatal logs FATAL, closes resource and exits with 1", func(t *testing.T) {
+		l, buf := newTestLogger(INFO)
+		cc := &countingCloser{}
+		l.closer = cc
+		exitCode := 0
+		l.exit = func(code int) { exitCode = code }
 
-func TestLogger_Error(t *testing.T) {
-	l, buf := newTestLogger(ERROR)
-	l.Error("DB_CONNECTION_FAILED", "host", "127.0.0.1")
-	out := buf.String()
-	if !strings.Contains(out, "DB_CONNECTION_FAILED") || !strings.Contains(out, "host=127.0.0.1") {
-		t.Errorf("Error() output = %q, want title and key-values", out)
-	}
-}
-
-func TestLogger_Fatal(t *testing.T) {
-	if os.Getenv("TEST_FATAL_PROCESS") == "1" {
-		l, _ := newTestLogger(FATAL)
 		l.Fatal("CRITICAL_FAILURE", "code", 500)
-		return
-	}
 
-	cmd := exec.Command(os.Args[0], "-test.run=TestLogger_Fatal")
-	cmd.Env = append(os.Environ(), "TEST_FATAL_PROCESS=1")
-	err := cmd.Run()
+		if exitCode != 1 {
+			t.Errorf("exitCode = %d, want 1", exitCode)
+		}
+		if cc.calls != 1 {
+			t.Errorf("closer calls = %d, want 1", cc.calls)
+		}
+		if !strings.Contains(buf.String(), "level=FATAL") || !strings.Contains(buf.String(), "CRITICAL_FAILURE") {
+			t.Errorf("unexpected Fatal output: %q", buf.String())
+		}
+	})
 
-	if e, ok := err.(*exec.ExitError); ok && !e.Success() {
-		// Process exited with non-zero status (expected from os.Exit(1))
-		return
-	}
-	t.Fatalf("TestLogger_Fatal expected process to exit with status 1, got error: %v", err)
+	t.Run("FatalCtx logs with context, closes resource and exits with 1", func(t *testing.T) {
+		buf := &bytes.Buffer{}
+		l, _ := New(Options{
+			MinLevel: INFO,
+			Format:   FormatText,
+			Writer:   buf,
+			ContextExtractor: func(ctx context.Context) []slog.Attr {
+				if v, ok := ctx.Value(traceKey).(string); ok {
+					return []slog.Attr{slog.String("trace_id", v)}
+				}
+				return nil
+			},
+		})
+		cc := &countingCloser{}
+		l.closer = cc
+		exitCode := 0
+		l.exit = func(code int) { exitCode = code }
+
+		ctx := context.WithValue(context.Background(), traceKey, "fatal-trace")
+		l.FatalCtx(ctx, "CRITICAL_CTX_FAILURE")
+
+		if exitCode != 1 || cc.calls != 1 {
+			t.Errorf("exitCode=%d, closer.calls=%d, want 1 and 1", exitCode, cc.calls)
+		}
+		if !strings.Contains(buf.String(), "trace_id=fatal-trace") || !strings.Contains(buf.String(), "level=FATAL") {
+			t.Errorf("unexpected FatalCtx output: %q", buf.String())
+		}
+	})
 }
 
-func TestLogger_Slog(t *testing.T) {
-	l, _ := newTestLogger(INFO)
+func TestLogger_SlogAndDerived(t *testing.T) {
+	l, buf := newTestLogger(INFO)
 	if got := l.Slog(); got == nil {
 		t.Error("Slog() returned nil, expected *slog.Logger")
 	}
-}
 
-func TestLogger_With(t *testing.T) {
-	l, buf := newTestLogger(INFO)
-	derived := l.With("service", "billing", "env", "prod")
+	var iface ILogger = l
+	derived := iface.With("service", "billing").WithGroup("meta")
 	if derived == nil {
-		t.Fatal("With() returned nil")
+		t.Fatal("With().WithGroup() returned nil")
 	}
 
 	derived.Info("TRANSACTION", "id", "tx-999")
 	out := buf.String()
-	if !strings.Contains(out, "service=billing") || !strings.Contains(out, "env=prod") || !strings.Contains(out, "id=tx-999") {
-		t.Errorf("With() derived logger output = %q, missing contextual attributes", out)
-	}
-}
-
-func TestLogger_WithGroup(t *testing.T) {
-	l, buf := newTestLogger(INFO)
-	derived := l.WithGroup("meta")
-	if derived == nil {
-		t.Fatal("WithGroup() returned nil")
-	}
-
-	derived.Info("USER_LOGIN", "id", 42)
-	out := buf.String()
-	if !strings.Contains(out, "meta.id=42") && !strings.Contains(out, "id=42") {
-		t.Errorf("WithGroup() output = %q, expected grouped attributes", out)
-	}
-}
-
-func TestLogger_write(t *testing.T) {
-	tests := []struct {
-		name        string
-		minLevel    Level
-		writeLevel  Level
-		title       string
-		keysVals    []any
-		shouldWrite bool
-	}{
-		{
-			name:        "Write enabled level",
-			minLevel:    INFO,
-			writeLevel:  INFO,
-			title:       "EVENT_OK",
-			keysVals:    []any{"status", "ok"},
-			shouldWrite: true,
-		},
-		{
-			name:        "Skip disabled level",
-			minLevel:    WARN,
-			writeLevel:  INFO,
-			title:       "EVENT_SKIPPED",
-			keysVals:    []any{"status", "skipped"},
-			shouldWrite: false,
-		},
-	}
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			l, buf := newTestLogger(tt.minLevel)
-			l.write(tt.writeLevel, tt.title, tt.keysVals...)
-			if tt.shouldWrite && buf.Len() == 0 {
-				t.Errorf("write() did not write output when level was enabled")
-			}
-			if !tt.shouldWrite && buf.Len() > 0 {
-				t.Errorf("write() wrote output when level was disabled: %q", buf.String())
-			}
-		})
+	if !strings.Contains(out, "service=billing") || !strings.Contains(out, "meta.id=tx-999") {
+		t.Errorf("derived logger output = %q, missing contextual/grouped attributes", out)
 	}
 }

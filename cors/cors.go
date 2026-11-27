@@ -230,7 +230,7 @@ func isOriginAllowed(target string, values []string) (string, bool) {
 
 func isMethodAllowed(target string, values []string) bool {
 	if len(values) == 0 {
-		return true
+		return false
 	}
 	_, ok := isMatchFold(target, values)
 	return ok

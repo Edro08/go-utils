@@ -3,6 +3,7 @@ package rsa
 import (
 	"crypto/rand"
 	"crypto/rsa"
+	"crypto/sha256"
 	"crypto/x509"
 	"encoding/pem"
 	"fmt"
@@ -10,7 +11,10 @@ import (
 )
 
 func Encrypt(publicKey *rsa.PublicKey, plaintext []byte) ([]byte, error) {
-	ciphertext, err := rsa.EncryptPKCS1v15(rand.Reader, publicKey, plaintext)
+	if publicKey == nil {
+		return nil, fmt.Errorf("%w: public key is nil", ErrEncryptFailed)
+	}
+	ciphertext, err := rsa.EncryptOAEP(sha256.New(), rand.Reader, publicKey, plaintext, nil)
 	if err != nil {
 		return nil, fmt.Errorf("%w: %v", ErrEncryptFailed, err)
 	}
@@ -18,7 +22,10 @@ func Encrypt(publicKey *rsa.PublicKey, plaintext []byte) ([]byte, error) {
 }
 
 func Decrypt(privateKey *rsa.PrivateKey, ciphertext []byte) ([]byte, error) {
-	plaintext, err := rsa.DecryptPKCS1v15(rand.Reader, privateKey, ciphertext)
+	if privateKey == nil {
+		return nil, fmt.Errorf("%w: private key is nil", ErrDecryptFailed)
+	}
+	plaintext, err := rsa.DecryptOAEP(sha256.New(), rand.Reader, privateKey, ciphertext, nil)
 	if err != nil {
 		return nil, fmt.Errorf("%w: %v", ErrDecryptFailed, err)
 	}

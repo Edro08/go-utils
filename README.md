@@ -21,27 +21,36 @@ import (
 - Crear una nueva configuración con `config.New`
 
 ```go
-cfg := config.New(config.Options{})
+cfg := config.New(config.Options{
+	ExpandEnv:    true,  // Opcional: expande ${VAR} y ${VAR:-default} en YAML
+	AutomaticEnv: true,  // Opcional: permite sobrescribir claves vía variables de entorno
+	EnvPrefix:    "APP", // Opcional: ej. server.port -> APP_SERVER_PORT
+})
 
-// Cargar desde archivo YAML
-cfg.LoadFile("app.yaml")
+// Cargar desde archivo YAML o bytes
+_ = cfg.LoadFile("app.yaml")
 
 // Cargar desde struct
-cfg.LoadStruct(&myConfig{})
+_ = cfg.LoadStruct(&myConfig{})
 ```
 
-- ***Opcional:*** Acceder a valores de configuración
+- ***Opcional:*** Acceder a valores de configuración, defaults y `Unmarshal`
 
 ```go
-valor  := cfg.GetString("database.host")
-puerto := cfg.GetInt("server.port")
-debug  := cfg.GetBool("debug")
+valor   := cfg.GetString("database.host")
+puerto  := cfg.GetIntOr("server.port", 8080)
+timeout := cfg.GetDurationOr("server.readTimeout", 15*time.Second)
+tlsOn   := cfg.GetBoolOr("server.tls", true)
+
+// Decodificar una sección directamente en un struct tipado
+var srvCfg ServerConfig
+_ = cfg.Unmarshal("server", &srvCfg)
 ```
 
 - Establecer o actualizar valores
 
 ```go
-cfg.Set("app.version", "2.0")
+_ = cfg.Set("app.version", "2.0")
 ```
 
 ### 🧊 Logs
@@ -54,26 +63,32 @@ import (
 )
 ```
 
-- Crear un nuevo logger con `logger.New`
+- Crear un nuevo logger con `logger.New` (`Options{}` usa `INFO`, `FormatJSON`, `Stdout` y `AddSource: false` por defecto)
 
 ```go
 opts := logger.Options{
-	MinLevel:   logger.DEBUG,
-	Format:     logger.FormatText,
-	EnableFile: true,     // Opcional: activa guardado en archivo además de consola
-	FilePath:   "./logs", // Opcional: ruta de la carpeta (genera ./logs/app_YYYYMMDDTHHMMSS_000000.log)
+	MinLevel:  logger.INFO,       // DEBUG, INFO, WARN, ERROR, FATAL (o logger.ParseLevel("INFO"))
+	Format:    logger.FormatJSON, // FormatJSON o FormatText
+	Output:    logger.Both,       // Stdout, File o Both
+	FilePath:  "./logs/app.log",  // Ruta de archivo .log o carpeta para timestamp automático
+	AddSource: false,             // Opcional: si es true, registra paquete/archivo.go recortado
 }
 
-log, _ := logger.New(opts)
+log, err := logger.New(opts)
+if err != nil {
+	panic(err)
+}
+defer func() { _ = log.Close() }()
 ```
 
-- ***Opcional:*** Agregar un nuevo log y utilizar contexto / grupos
+- ***Opcional:*** Agregar registros, contexto (`*Ctx`) y grupos
 ```go
 log.Info("Titulo", "key", "value")
 log.Debug("Mensaje debug", "modulo", "auth")
 log.Error("Error capturado", "err", err)
+log.InfoCtx(ctx, "Operación con contexto", "id", 42)
 
-// Logger contextual con atributos fijos o grupos (basado en log/slog)
+// Logger contextual con atributos fijos o grupos (retorna logger.ILogger)
 authLogger := log.With("modulo", "auth").WithGroup("http")
 authLogger.Info("Petición procesada", "status", 200)
 

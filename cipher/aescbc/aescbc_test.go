@@ -68,6 +68,24 @@ func Test_pkcs7Unpad(t *testing.T) {
 			want:    nil,
 			wantErr: true,
 		},
+		{
+			name:    "Zero padding fails",
+			data:    []byte{'h', 'e', 'l', 'l', 'o', 0, 0, 0},
+			want:    nil,
+			wantErr: true,
+		},
+		{
+			name:    "Padding larger than AES block size fails",
+			data:    bytes.Repeat([]byte{17}, 17),
+			want:    nil,
+			wantErr: true,
+		},
+		{
+			name:    "Inconsistent padding bytes fail",
+			data:    []byte{'h', 'e', 'l', 'l', 'o', 1, 2, 3},
+			want:    nil,
+			wantErr: true,
+		},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -110,6 +128,14 @@ func TestEncrypt(t *testing.T) {
 			plaintext: []byte("secret-message"),
 			wantErr:   true,
 			targetErr: ErrCreateCipherBlock,
+		},
+		{
+			name:      "Invalid IV size fails with ErrEncryptFailed",
+			key:       validKey,
+			iv:        []byte("short-iv"),
+			plaintext: []byte("secret-message"),
+			wantErr:   true,
+			targetErr: ErrEncryptFailed,
 		},
 	}
 	for _, tt := range tests {
@@ -169,6 +195,22 @@ func TestDecrypt(t *testing.T) {
 			key:        validKey,
 			iv:         validIV,
 			ciphertext: []byte("not-multiple-of-16"),
+			wantErr:    true,
+			targetErr:  ErrDecryptFailed,
+		},
+		{
+			name:       "Empty ciphertext fails",
+			key:        validKey,
+			iv:         validIV,
+			ciphertext: []byte{},
+			wantErr:    true,
+			targetErr:  ErrDecryptFailed,
+		},
+		{
+			name:       "Invalid IV size fails",
+			key:        validKey,
+			iv:         []byte("short-iv"),
+			ciphertext: bytes.Clone(ciphertext),
 			wantErr:    true,
 			targetErr:  ErrDecryptFailed,
 		},

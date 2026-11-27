@@ -3,12 +3,21 @@ package config
 import (
 	"fmt"
 	"math"
+	"os"
 	"reflect"
 	"strconv"
 	"strings"
+	"time"
 )
 
-// cloneValue realiza una copia profunda de los valores internos. Previene que mapas y slices retornados mantengan referencias a c.data.
+func (c *Config) separator() string {
+	if c.opts.Separator == "" {
+		return defaultSeparator
+	}
+	return c.opts.Separator
+}
+
+// cloneValue realiza una copia profunda de los valores internos. Previene que mapas, slices y []byte retornados mantengan referencias a c.data.
 func cloneValue(v interface{}) interface{} {
 	switch val := v.(type) {
 	case map[string]interface{}:
@@ -23,17 +32,30 @@ func cloneValue(v interface{}) interface{} {
 			cp[i] = cloneValue(v2)
 		}
 		return cp
+	case []byte:
+		cp := make([]byte, len(val))
+		copy(cp, val)
+		return cp
 	default:
-		// Los tipos primitivos (string, int, bool, etc.) en Go se pasan por valor.
+		// Los tipos primitivos (string, int, bool, time.Duration, etc.) en Go se pasan por valor.
 		return val
 	}
 }
 
 // normalizeValue normaliza valores externos a la representación interna utilizada por Config.
-// Los mapas se convierten a map[string]interface{} y los slices/arrays a []interface{} de forma recursiva.
+// Los mapas se convierten a map[string]interface{} y los slices/arrays (excepto []byte) a []interface{} de forma recursiva.
 func normalizeValue(v interface{}) (interface{}, error) {
 	if v == nil {
 		return nil, nil
+	}
+
+	switch typed := v.(type) {
+	case []byte:
+		cp := make([]byte, len(typed))
+		copy(cp, typed)
+		return cp, nil
+	case time.Duration:
+		return typed, nil
 	}
 
 	rv := reflect.ValueOf(v)
@@ -43,8 +65,12 @@ func normalizeValue(v interface{}) (interface{}, error) {
 		result := make(map[string]interface{}, rv.Len())
 
 		for _, key := range rv.MapKeys() {
-			if key.Kind() != reflect.String {
-				return nil, fmt.Errorf("%w: got %s", ErrMapKeyType, key.Kind())
+			k := key
+			if k.Kind() == reflect.Interface && !k.IsNil() {
+				k = k.Elem()
+			}
+			if k.Kind() != reflect.String {
+				return nil, fmt.Errorf("%w: got %s", ErrMapKeyType, k.Kind())
 			}
 
 			value, err := normalizeValue(
@@ -54,7 +80,7 @@ func normalizeValue(v interface{}) (interface{}, error) {
 				return nil, err
 			}
 
-			result[key.String()] = value
+			result[k.String()] = value
 		}
 
 		return result, nil
@@ -78,13 +104,100 @@ func normalizeValue(v interface{}) (interface{}, error) {
 	}
 }
 
-// findValue navega el mapa interno. Debe ser llamado únicamente bajo un bloqueo (RLock o Lock).
+// envKeyName construye el nombre de variable de entorno correspondiente a una clave jerárquica.
+func (c *Config) envKeyName(key string) string {
+	sep := c.separator()
+	normalized := strings.ReplaceAll(key, sep, "_")
+	normalized = strings.ReplaceAll(normalized, ".", "_")
+	normalized = strings.ReplaceAll(normalized, "-", "_")
+	normalized = strings.ToUpper(normalized)
+
+	prefix := strings.TrimSpace(c.opts.EnvPrefix)
+	prefix = strings.TrimSuffix(prefix, "_")
+	if prefix != "" {
+		return strings.ToUpper(prefix) + "_" + normalized
+	}
+	return normalized
+}
+
+func (c *Config) lookupEnv(key string) (string, bool) {
+	if !c.opts.AutomaticEnv || key == "" {
+		return "", false
+	}
+	return os.LookupEnv(c.envKeyName(key))
+}
+
+func (c *Config) applyEnvOverridesToMap(prefix string, m map[string]interface{}) {
+	sep := c.separator()
+	for k, v := range m {
+		fullKey := k
+		if prefix != "" {
+			fullKey = prefix + sep + k
+		}
+		if sub, ok := v.(map[string]interface{}); ok {
+			c.applyEnvOverridesToMap(fullKey, sub)
+			continue
+		}
+		if envVal, ok := c.lookupEnv(fullKey); ok {
+			m[k] = coerceEnvValue(v, envVal)
+		}
+	}
+}
+
+func coerceEnvValue(existing interface{}, envVal string) interface{} {
+	switch existing.(type) {
+	case []interface{}:
+		return splitEnvSlice(envVal)
+	case int, int8, int16, int32, int64, uint, uint8, uint16, uint32, uint64:
+		if i, ok := parseInt(envVal); ok {
+			return i
+		}
+		return envVal
+	case float32, float64:
+		if f, ok := parseFloat64(envVal); ok {
+			return f
+		}
+		return envVal
+	case bool:
+		if b, ok := parseBool(envVal); ok {
+			return b
+		}
+		return envVal
+	case time.Duration:
+		if d, ok := parseDuration(envVal); ok {
+			return d
+		}
+		return envVal
+	default:
+		return envVal
+	}
+}
+
+func splitEnvSlice(raw string) []interface{} {
+	trimmed := strings.TrimSpace(raw)
+	if trimmed == "" {
+		return []interface{}{}
+	}
+	parts := strings.Split(trimmed, ",")
+	res := make([]interface{}, 0, len(parts))
+	for _, p := range parts {
+		res = append(res, strings.TrimSpace(p))
+	}
+	return res
+}
+
+// findValue navega el mapa interno (y variables de entorno si AutomaticEnv está activo).
+// Debe ser llamado únicamente bajo un bloqueo (RLock o Lock).
 func (c *Config) findValue(key string) (interface{}, bool) {
 	if key == "" {
 		return nil, false
 	}
 
-	keys := strings.Split(key, c.opts.Separator)
+	if envVal, ok := c.lookupEnv(key); ok {
+		return envVal, true
+	}
+
+	keys := strings.Split(key, c.separator())
 	var current interface{} = c.data
 
 	for _, k := range keys {
@@ -102,7 +215,7 @@ func (c *Config) findValue(key string) (interface{}, bool) {
 	return current, true
 }
 
-// getValue adquiere el RLock de forma segura, busca el valor y lo clona antes de liberarlo.
+// getValue busca el valor y lo clona antes de devolverlo. Debe llamarse bajo RLock/Lock.
 func (c *Config) getValue(key string) (interface{}, bool) {
 	val, ok := c.findValue(key)
 	if !ok {
@@ -123,8 +236,12 @@ func (c *Config) getMap(key string) (map[string]interface{}, bool) {
 	return m, ok
 }
 
-// getSlice devuelve una copia segura del slice interno.
+// getSlice devuelve una copia segura del slice interno (o parsea lista separada por comas desde AutomaticEnv).
 func (c *Config) getSlice(key string) ([]interface{}, bool) {
+	if envVal, ok := c.lookupEnv(key); ok {
+		return splitEnvSlice(envVal), true
+	}
+
 	v, ok := c.getValue(key)
 	if !ok {
 		return nil, false
@@ -147,7 +264,11 @@ func (c *Config) set(key string, value interface{}) error {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 
-	keys := strings.Split(key, c.opts.Separator)
+	if c.data == nil {
+		c.data = make(map[string]interface{})
+	}
+
+	keys := strings.Split(key, c.separator())
 	cm := c.data
 
 	for i := 0; i < len(keys)-1; i++ {
@@ -175,7 +296,7 @@ func (c *Config) set(key string, value interface{}) error {
 // convertToStringMap convierte un map[string]interface{} a map[string]string,
 // aplicando la conversión a string para cada valor.
 func convertToStringMap(input map[string]interface{}) (map[string]string, bool) {
-	data := make(map[string]string)
+	data := make(map[string]string, len(input))
 	for k, v := range input {
 		data[k] = toString(v)
 	}
@@ -185,7 +306,7 @@ func convertToStringMap(input map[string]interface{}) (map[string]string, bool) 
 // convertToIntMap convierte un map[string]interface{} a map[string]int,
 // aplicando la conversión a int para cada valor.
 func convertToIntMap(input map[string]interface{}) (map[string]int, bool) {
-	data := make(map[string]int)
+	data := make(map[string]int, len(input))
 	for k, v := range input {
 		data[k] = toInt(v)
 	}
@@ -195,7 +316,7 @@ func convertToIntMap(input map[string]interface{}) (map[string]int, bool) {
 // convertToFloatMap convierte un map[string]interface{} a map[string]float64,
 // aplicando la conversión a float64 para cada valor.
 func convertToFloatMap(input map[string]interface{}) (map[string]float64, bool) {
-	data := make(map[string]float64)
+	data := make(map[string]float64, len(input))
 	for k, v := range input {
 		data[k] = toFloat64(v)
 	}
@@ -205,7 +326,7 @@ func convertToFloatMap(input map[string]interface{}) (map[string]float64, bool) 
 // convertToBoolMap convierte un map[string]interface{} a map[string]bool,
 // aplicando la conversión a bool para cada valor.
 func convertToBoolMap(input map[string]interface{}) (map[string]bool, bool) {
-	data := make(map[string]bool)
+	data := make(map[string]bool, len(input))
 	for k, v := range input {
 		data[k] = toBool(v)
 	}
@@ -252,123 +373,181 @@ func convertToBoolSlice(input []interface{}) ([]bool, bool) {
 	return result, true
 }
 
-// toString convierte cualquier valor básico a string,
-// manejando tipos numéricos, booleanos y cadenas.
-// Para tipos no reconocidos devuelve cadena vacía.
-func toString(value interface{}) string {
+func parseString(value interface{}) (string, bool) {
 	switch v := value.(type) {
 	case string:
-		return v
+		return v, true
+	case []byte:
+		return string(v), true
+	case time.Duration:
+		return v.String(), true
 	case int:
-		return strconv.Itoa(v)
+		return strconv.Itoa(v), true
 	case int8:
-		return strconv.FormatInt(int64(v), 10)
+		return strconv.FormatInt(int64(v), 10), true
 	case int16:
-		return strconv.FormatInt(int64(v), 10)
+		return strconv.FormatInt(int64(v), 10), true
 	case int32:
-		return strconv.FormatInt(int64(v), 10)
+		return strconv.FormatInt(int64(v), 10), true
 	case int64:
-		return strconv.FormatInt(v, 10)
+		return strconv.FormatInt(v, 10), true
 	case uint:
-		return strconv.FormatUint(uint64(v), 10)
+		return strconv.FormatUint(uint64(v), 10), true
 	case uint8:
-		return strconv.FormatUint(uint64(v), 10)
+		return strconv.FormatUint(uint64(v), 10), true
 	case uint16:
-		return strconv.FormatUint(uint64(v), 10)
+		return strconv.FormatUint(uint64(v), 10), true
 	case uint32:
-		return strconv.FormatUint(uint64(v), 10)
+		return strconv.FormatUint(uint64(v), 10), true
 	case uint64:
-		return strconv.FormatUint(v, 10)
+		return strconv.FormatUint(v, 10), true
 	case float32:
-		return strconv.FormatFloat(float64(v), 'f', -1, 32)
+		return strconv.FormatFloat(float64(v), 'f', -1, 32), true
 	case float64:
-		return strconv.FormatFloat(v, 'f', -1, 64)
+		return strconv.FormatFloat(v, 'f', -1, 64), true
 	case bool:
-		return strconv.FormatBool(v)
+		return strconv.FormatBool(v), true
 	default:
-		return ""
+		return "", false
+	}
+}
+
+// toString convierte cualquier valor básico a string,
+// manejando tipos numéricos, booleanos, []byte, time.Duration y cadenas.
+// Para tipos no reconocidos devuelve cadena vacía.
+func toString(value interface{}) string {
+	s, _ := parseString(value)
+	return s
+}
+
+func parseInt(value interface{}) (int, bool) {
+	switch v := value.(type) {
+	case int:
+		return v, true
+	case int8:
+		return int(v), true
+	case int16:
+		return int(v), true
+	case int32:
+		return int(v), true
+	case int64:
+		if strconv.IntSize == 32 && (v < math.MinInt32 || v > math.MaxInt32) {
+			return 0, false
+		}
+		return int(v), true
+	case uint:
+		if strconv.IntSize == 32 && v > math.MaxInt32 {
+			return 0, false
+		}
+		return int(v), true
+	case uint8:
+		return int(v), true
+	case uint16:
+		return int(v), true
+	case uint32:
+		if strconv.IntSize == 32 && v > math.MaxInt32 {
+			return 0, false
+		}
+		return int(v), true
+	case uint64:
+		if strconv.IntSize == 32 && v > math.MaxInt32 {
+			return 0, false
+		}
+		if strconv.IntSize == 64 && v > math.MaxInt64 {
+			return 0, false
+		}
+		return int(v), true
+	case float64:
+		if math.IsNaN(v) || math.IsInf(v, 0) || v != math.Trunc(v) {
+			return 0, false
+		}
+		if strconv.IntSize == 32 {
+			if v < math.MinInt32 || v > math.MaxInt32 {
+				return 0, false
+			}
+		} else {
+			if v < math.MinInt64 || v >= float64(math.MaxInt64) {
+				return 0, false
+			}
+		}
+		return int(v), true
+
+	case float32:
+		f := float64(v)
+		if math.IsNaN(f) || math.IsInf(f, 0) || f != math.Trunc(f) {
+			return 0, false
+		}
+		if strconv.IntSize == 32 {
+			if f < math.MinInt32 || f > math.MaxInt32 {
+				return 0, false
+			}
+		} else {
+			if f < math.MinInt64 || f >= float64(math.MaxInt64) {
+				return 0, false
+			}
+		}
+		return int(v), true
+
+	case string:
+		i, err := strconv.Atoi(strings.TrimSpace(v))
+		if err != nil {
+			return 0, false
+		}
+		return i, true
+
+	default:
+		return 0, false
 	}
 }
 
 // toInt convierte un valor básico a int, realizando conversiones
 // seguras desde tipos numéricos y cadenas. Retorna 0 si no es convertible.
 func toInt(value interface{}) int {
-	switch v := value.(type) {
-	case int:
-		return v
-	case int8:
-		return int(v)
-	case int16:
-		return int(v)
-	case int32:
-		return int(v)
-	case int64:
-		if strconv.IntSize == 32 && (v < math.MinInt32 || v > math.MaxInt32) {
-			return 0
-		}
-		return int(v)
-	case uint:
-		if strconv.IntSize == 32 && v > math.MaxInt32 {
-			return 0
-		}
-		return int(v)
-	case uint8:
-		return int(v)
-	case uint16:
-		return int(v)
-	case uint32:
-		if strconv.IntSize == 32 && v > math.MaxInt32 {
-			return 0
-		}
-		return int(v)
-	case uint64:
-		if strconv.IntSize == 32 && v > math.MaxInt32 {
-			return 0
-		}
-		if strconv.IntSize == 64 && v > math.MaxInt64 {
-			return 0
-		}
-		return int(v)
-	case float64:
-		if v != math.Trunc(v) {
-			return 0
-		}
-		if strconv.IntSize == 32 {
-			if v < math.MinInt32 || v > math.MaxInt32 {
-				return 0
-			}
-		} else {
-			if v < math.MinInt64 || v > math.MaxInt64 {
-				return 0
-			}
-		}
-		return int(v)
+	i, _ := parseInt(value)
+	return i
+}
 
+func parseFloat64(value interface{}) (float64, bool) {
+	switch v := value.(type) {
+	case float64:
+		if math.IsNaN(v) || math.IsInf(v, 0) {
+			return 0, false
+		}
+		return v, true
 	case float32:
 		f := float64(v)
-		if f != math.Trunc(f) {
-			return 0
+		if math.IsNaN(f) || math.IsInf(f, 0) {
+			return 0, false
 		}
-		if strconv.IntSize == 32 {
-			if f < math.MinInt32 || f > math.MaxInt32 {
-				return 0
-			}
-		} else {
-			if f < math.MinInt64 || f > math.MaxInt64 {
-				return 0
-			}
-		}
-		return int(v)
-
+		return f, true
+	case int:
+		return float64(v), true
+	case int8:
+		return float64(v), true
+	case int16:
+		return float64(v), true
+	case int32:
+		return float64(v), true
+	case int64:
+		return float64(v), true
+	case uint:
+		return float64(v), true
+	case uint8:
+		return float64(v), true
+	case uint16:
+		return float64(v), true
+	case uint32:
+		return float64(v), true
+	case uint64:
+		return float64(v), true
 	case string:
-		i, err := strconv.Atoi(v)
-		if err != nil {
-			return 0
+		f, err := strconv.ParseFloat(strings.TrimSpace(v), 64)
+		if err == nil && !math.IsNaN(f) && !math.IsInf(f, 0) {
+			return f, true
 		}
-		return i
-
+		return 0, false
 	default:
-		return 0
+		return 0, false
 	}
 }
 
@@ -376,39 +555,25 @@ func toInt(value interface{}) int {
 // desde enteros, flotantes y cadenas.
 // Retorna 0 si no es convertible.
 func toFloat64(value interface{}) float64 {
+	f, _ := parseFloat64(value)
+	return f
+}
+
+func parseBool(value interface{}) (bool, bool) {
 	switch v := value.(type) {
-	case float64:
-		return v
-	case float32:
-		return float64(v)
-	case int:
-		return float64(v)
-	case int8:
-		return float64(v)
-	case int16:
-		return float64(v)
-	case int32:
-		return float64(v)
-	case int64:
-		return float64(v)
-	case uint:
-		return float64(v)
-	case uint8:
-		return float64(v)
-	case uint16:
-		return float64(v)
-	case uint32:
-		return float64(v)
-	case uint64:
-		return float64(v)
+	case bool:
+		return v, true
 	case string:
-		f, err := strconv.ParseFloat(v, 64)
-		if err == nil {
-			return f
+		s := strings.TrimSpace(v)
+		if strings.EqualFold(s, "true") {
+			return true, true
 		}
-		return 0
+		if strings.EqualFold(s, "false") {
+			return false, true
+		}
+		return false, false
 	default:
-		return 0
+		return false, false
 	}
 }
 
@@ -416,17 +581,21 @@ func toFloat64(value interface{}) float64 {
 // y cadenas "true"/"false" (sin distinguir mayúsculas).
 // Retorna false si no es convertible.
 func toBool(value interface{}) bool {
+	b, _ := parseBool(value)
+	return b
+}
+
+func parseDuration(value interface{}) (time.Duration, bool) {
 	switch v := value.(type) {
-	case bool:
-		return v
+	case time.Duration:
+		return v, true
 	case string:
-		if strings.EqualFold(v, "true") {
-			return true
-		} else if strings.EqualFold(v, "false") {
-			return false
+		d, err := time.ParseDuration(strings.TrimSpace(v))
+		if err != nil {
+			return 0, false
 		}
-		return false
+		return d, true
 	default:
-		return false
+		return 0, false
 	}
 }

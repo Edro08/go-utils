@@ -337,7 +337,8 @@ func Test_isMethodAllowed(t *testing.T) {
 		values []string
 		want   bool
 	}{
-		{"Empty allowed methods permits any method", "PATCH", []string{}, true},
+		{"Empty allowed methods denies any method", "PATCH", []string{}, false},
+		{"Wildcard allows any method", "PATCH", []string{"*"}, true},
 		{"Allowed method matches", "get", []string{"GET", "POST"}, true},
 		{"Disallowed method returns false", "DELETE", []string{"GET", "POST"}, false},
 	}

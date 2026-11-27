@@ -275,3 +275,58 @@ func TestConfig_LoadStruct(t *testing.T) {
 		})
 	}
 }
+
+func TestConfig_ExpandEnvAndLoadBytes(t *testing.T) {
+	t.Setenv("TEST_DB_HOST", "db.internal")
+	t.Setenv("TEST_EMPTY_VAR", "")
+
+	yamlContent := `
+database:
+  host: "${TEST_DB_HOST}"
+  port: ${TEST_DB_PORT:-5432}
+  user: "${TEST_EMPTY_VAR:-postgres}"
+  pass: "${TEST_EMPTY_VAR-fallbackNotUsed}"
+  unsetDash: "${TEST_UNSET_VAR-fallbackUsed}"
+  bcryptHash: "$2a$10$unbracedDollarPreserved"
+  escaped: "$${NOT_EXPANDED}"
+`
+	tmpFile := filepath.Join(t.TempDir(), "config.yaml")
+	if err := os.WriteFile(tmpFile, []byte(yamlContent), 0600); err != nil {
+		t.Fatalf("WriteFile error: %v", err)
+	}
+
+	cfg := New(Options{ExpandEnv: true})
+	if err := cfg.LoadFile(tmpFile); err != nil {
+		t.Fatalf("LoadFile error: %v", err)
+	}
+
+	if got := cfg.GetString("database.host"); got != "db.internal" {
+		t.Errorf("host = %q, want db.internal", got)
+	}
+	if got := cfg.GetInt("database.port"); got != 5432 {
+		t.Errorf("port = %d, want 5432", got)
+	}
+	if got := cfg.GetString("database.user"); got != "postgres" {
+		t.Errorf("user = %q, want postgres", got)
+	}
+	if got := cfg.GetString("database.pass"); got != "" {
+		t.Errorf("pass = %q, want empty string", got)
+	}
+	if got := cfg.GetString("database.unsetDash"); got != "fallbackUsed" {
+		t.Errorf("unsetDash = %q, want fallbackUsed", got)
+	}
+	if got := cfg.GetString("database.bcryptHash"); got != "$2a$10$unbracedDollarPreserved" {
+		t.Errorf("bcryptHash = %q, want preserved hash", got)
+	}
+	if got := cfg.GetString("database.escaped"); got != "${NOT_EXPANDED}" {
+		t.Errorf("escaped = %q, want ${NOT_EXPANDED}", got)
+	}
+
+	// Empty YAML comment should not overwrite existing data
+	if err := cfg.LoadBytes([]byte("# empty yaml\n")); err != nil {
+		t.Fatalf("LoadBytes empty error: %v", err)
+	}
+	if got := cfg.GetString("database.host"); got != "db.internal" {
+		t.Errorf("after empty LoadBytes, host = %q, want db.internal", got)
+	}
+}

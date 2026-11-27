@@ -58,7 +58,7 @@ func TestEncrypt(t *testing.T) {
 		{
 			name:      "Message too long for RSA key size returns ErrEncryptFailed",
 			publicKey: pub,
-			plaintext: make([]byte, 512), // 512 bytes exceeds 2048-bit PKCS1v15 max message length
+			plaintext: make([]byte, 512), // 512 bytes exceeds 2048-bit OAEP max message length
 			wantErr:   true,
 			targetErr: ErrEncryptFailed,
 		},

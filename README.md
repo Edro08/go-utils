@@ -1,6 +1,6 @@
 ## 💻 go-utils
 
-**Descripción:** Una librería de utilidades generales para proyectos en Go. Incluye herramientas reutilizables para configuraciones, logs, CORS, tokens JWT y cifrado.
+**Descripción:** Una librería de utilidades generales para proyectos en Go. Incluye herramientas reutilizables para configuraciones, logs, CORS, tokens JWT, cifrado y clientes HTTP (REST y SOAP).
 
 ### 🔌 Instalación
 
@@ -235,4 +235,67 @@ iv  := []byte("16-byte-iv-here!")
 
 ciphertext, _ := aescbc.Encrypt(key, iv, []byte("mensaje secreto"))
 plaintext, _  := aescbc.Decrypt(key, iv, ciphertext)
+```
+
+### 🧊 Cliente REST
+
+- Importar el paquete
+
+```go
+import (
+    "github.com/edro08/go-utils/client/rest"
+)
+```
+
+- Crear el cliente con timeouts, transport, middlewares y logger opcional
+
+```go
+c := rest.New(rest.Options{
+	Timeout:     10 * time.Second,
+	Logger:      log, // Opcional: logger.ILogger
+	Middlewares: []rest.Middleware{traceMiddleware},
+})
+
+var out UserResponse
+var apiErr ErrorResponse
+
+resp, err := c.R(ctx).
+	SetURL("https://api.example.com/v1/users").
+	SetBearerToken(token).
+	SetHeader("X-Request-ID", reqID).
+	SetQueryParam("active", "true").
+	SetBody(createUserReq). // También soporta SetFormData y SetMultipartFormData / SetFile
+	SetResult(&out).
+	SetError(&apiErr).
+	Post()
+```
+
+### 🧊 Cliente SOAP
+
+- Importar el paquete
+
+```go
+import (
+    "github.com/edro08/go-utils/client/soap"
+)
+```
+
+- Crear el cliente SOAP (1.1 o 1.2) y enviar peticiones con sobre y manejo de `<Fault>` automático
+
+```go
+c := soap.New(soap.Options{
+	Version:     soap.Version11, // soap.Version11 o soap.Version12
+	Timeout:     15 * time.Second,
+	Logger:      log, // Opcional: logger.ILogger
+	Middlewares: []soap.Middleware{traceMiddleware},
+})
+
+var out GetBalanceResponse
+resp, err := c.R(ctx).
+	SetURL("https://legacy.example.com/Service.asmx").
+	SetAction("http://tempuri.org/GetBalance").
+	SetSOAPHeaders(authHeader, traceHeader). // o SetSOAPHeader(authHeader)
+	SetBody(GetBalanceRequest{AccountID: "123"}).
+	SetResult(&out).
+	Send()
 ```

@@ -1022,3 +1022,10 @@ func TestConfig_BytesAndDurationValues(t *testing.T) {
 		t.Errorf("GetString(time.Duration) = %q, want 250ms", got)
 	}
 }
+
+func Test_parseInt_UintOverflow(t *testing.T) {
+	maxUint := ^uint(0)
+	if got, ok := parseInt(maxUint); ok || got != 0 {
+		t.Errorf("parseInt(maxUint) = (%d, %v), want (0, false)", got, ok)
+	}
+}

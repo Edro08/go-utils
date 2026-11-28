@@ -38,13 +38,14 @@ type CorsMiddleware interface {
 }
 
 var (
-	ErrAllowedOriginsEmpty     = errors.New("cors: allowed origins cannot be empty")
-	ErrWildcardWithCredentials = errors.New("cors: wildcard origin cannot be used with credentials")
-	ErrEmptyAllowedOrigin      = errors.New("cors: allowed origins cannot contain empty values")
-	ErrEmptyAllowedMethod      = errors.New("cors: allowed methods cannot contain empty values")
-	ErrEmptyAllowedHeader      = errors.New("cors: allowed headers cannot contain empty values")
-	ErrEmptyExposedHeader      = errors.New("cors: exposed headers cannot contain empty values")
-	ErrInvalidMaxAge           = errors.New("cors: max age cannot be negative")
+	ErrAllowedOriginsEmpty                   = errors.New("cors: allowed origins cannot be empty")
+	ErrWildcardWithCredentials               = errors.New("cors: wildcard origin cannot be used with credentials")
+	ErrWildcardExposedHeadersWithCredentials = errors.New("cors: wildcard exposed headers cannot be used with credentials")
+	ErrEmptyAllowedOrigin                    = errors.New("cors: allowed origins cannot contain empty values")
+	ErrEmptyAllowedMethod                    = errors.New("cors: allowed methods cannot contain empty values")
+	ErrEmptyAllowedHeader                    = errors.New("cors: allowed headers cannot contain empty values")
+	ErrEmptyExposedHeader                    = errors.New("cors: exposed headers cannot contain empty values")
+	ErrInvalidMaxAge                         = errors.New("cors: max age cannot be negative")
 )
 
 const (
@@ -72,6 +73,8 @@ type Cors struct {
 	formattedExposed  string
 	formattedMaxAge   string
 	hasWildcardHeader bool
+	hasWildcardMethod bool
+	varyOrigin        bool
 }
 
 type Options struct {
@@ -88,20 +91,34 @@ func NewCors(options Options) (*Cors, error) {
 		return nil, err
 	}
 
+	normalizedOrigins := normalizeSlice(options.AllowedOrigins)
+	normalizedMethods := normalizeSlice(options.AllowedMethods)
+	normalizedHeaders := normalizeSlice(options.AllowedHeaders)
+	normalizedExposed := normalizeSlice(options.ExposedHeaders)
+
 	c := &Cors{
-		options:           options,
-		hasWildcardHeader: containsWildcard(options.AllowedHeaders),
+		options: Options{
+			AllowedOrigins:   normalizedOrigins,
+			AllowedMethods:   normalizedMethods,
+			AllowedHeaders:   normalizedHeaders,
+			ExposedHeaders:   normalizedExposed,
+			AllowCredentials: options.AllowCredentials,
+			MaxAge:           options.MaxAge,
+		},
+		hasWildcardHeader: containsWildcard(normalizedHeaders),
+		hasWildcardMethod: containsWildcard(normalizedMethods),
+		varyOrigin:        shouldVaryOrigin(normalizedOrigins),
 	}
 
-	// Normalizamos y preformateamos cabeceras para optimizar las peticiones HTTP
-	if len(options.AllowedMethods) > 0 {
-		c.formattedMethods = strings.Join(normalizeSlice(options.AllowedMethods), ", ")
+	// Preformateamos cabeceras para optimizar las peticiones HTTP.
+	if len(normalizedMethods) > 0 {
+		c.formattedMethods = strings.Join(normalizedMethods, ", ")
 	}
-	if len(options.AllowedHeaders) > 0 {
-		c.formattedHeaders = strings.Join(normalizeSlice(options.AllowedHeaders), ", ")
+	if len(normalizedHeaders) > 0 {
+		c.formattedHeaders = strings.Join(normalizedHeaders, ", ")
 	}
-	if len(options.ExposedHeaders) > 0 {
-		c.formattedExposed = strings.Join(normalizeSlice(options.ExposedHeaders), ", ")
+	if len(normalizedExposed) > 0 {
+		c.formattedExposed = strings.Join(normalizedExposed, ", ")
 	}
 	if options.MaxAge > 0 {
 		c.formattedMaxAge = strconv.Itoa(options.MaxAge)
@@ -126,42 +143,46 @@ func (c *Cors) Middleware(next http.Handler) http.Handler {
 			return
 		}
 
-		c.setAllowOriginHeader(w, allowedOrigin)
-		c.setExposeHeadersHeader(w)
-		c.setAllowCredentialsHeader(w)
-
 		// Las peticiones que no son preflight continúan al siguiente handler.
 		if r.Method != http.MethodOptions {
+			c.setAllowOriginHeader(w, allowedOrigin)
+			c.setExposeHeadersHeader(w)
+			c.setAllowCredentialsHeader(w)
 			next.ServeHTTP(w, r)
 			return
 		}
 
-		c.setPreflightVaryHeaders(w)
-
-		method := r.Header.Get(requestMethod)
-		if method == "" {
-			http.Error(w, MsgStatusMethodNotAllowed, http.StatusMethodNotAllowed)
-			return
-		}
-
-		if !isMethodAllowed(method, c.options.AllowedMethods) {
-			http.Error(w, MsgStatusMethodNotAllowed, http.StatusMethodNotAllowed)
-			return
-		}
-
-		requestedHeaders := splitAndTrim(r.Header.Get(requestHeaders))
-
-		if !areHeadersAllowed(requestedHeaders, c.options.AllowedHeaders) {
-			http.Error(w, MsgStatusForbidden, http.StatusForbidden)
-			return
-		}
-
-		c.setAllowMethodsHeader(w)
-		c.setAllowHeadersHeader(w, requestedHeaders)
-		c.setMaxAgeHeader(w)
-
-		w.WriteHeader(http.StatusNoContent)
+		c.handlePreflight(w, r, allowedOrigin)
 	})
+}
+
+func (c *Cors) handlePreflight(w http.ResponseWriter, r *http.Request, allowedOrigin string) {
+	c.setPreflightVaryHeaders(w)
+
+	method := strings.TrimSpace(r.Header.Get(requestMethod))
+	if method == "" {
+		http.Error(w, MsgStatusMethodNotAllowed, http.StatusMethodNotAllowed)
+		return
+	}
+
+	if !isMethodAllowed(method, c.options.AllowedMethods) {
+		http.Error(w, MsgStatusMethodNotAllowed, http.StatusMethodNotAllowed)
+		return
+	}
+
+	requestedHeaders := extractRequestHeaders(r.Header.Values(requestHeaders))
+	if !areHeadersAllowed(requestedHeaders, c.options.AllowedHeaders) {
+		http.Error(w, MsgStatusForbidden, http.StatusForbidden)
+		return
+	}
+
+	w.Header().Set(allowOriginHeader, allowedOrigin)
+	c.setAllowCredentialsHeader(w)
+	c.setAllowMethodsHeader(w, method)
+	c.setAllowHeadersHeader(w, requestedHeaders)
+	c.setMaxAgeHeader(w)
+
+	w.WriteHeader(http.StatusNoContent)
 }
 
 func validateOptions(options *Options) error {
@@ -173,6 +194,10 @@ func validateOptions(options *Options) error {
 
 	if options.AllowCredentials && containsWildcard(options.AllowedOrigins) {
 		errs = append(errs, ErrWildcardWithCredentials)
+	}
+
+	if options.AllowCredentials && containsWildcard(options.ExposedHeaders) {
+		errs = append(errs, ErrWildcardExposedHeadersWithCredentials)
 	}
 
 	if hasEmptyValues(options.AllowedOrigins) {
@@ -196,6 +221,14 @@ func validateOptions(options *Options) error {
 	}
 
 	return errors.Join(errs...)
+}
+
+func shouldVaryOrigin(origins []string) bool {
+	if len(origins) == 1 && origins[0] == Default {
+		return false
+	}
+
+	return true
 }
 
 func containsWildcard(values []string) bool {

@@ -344,7 +344,7 @@ func (c *Config) Unmarshal(keys string, out interface{}) error {
 		return ErrInvalidTarget
 	}
 	rv := reflect.ValueOf(out)
-	if rv.Kind() != reflect.Ptr || rv.IsNil() {
+	if rv.Kind() != reflect.Pointer || rv.IsNil() {
 		return ErrInvalidTarget
 	}
 
@@ -369,10 +369,10 @@ func (c *Config) Unmarshal(keys string, out interface{}) error {
 
 	raw, err := yaml.Marshal(target)
 	if err != nil {
-		return fmt.Errorf("%w: %v", ErrMarshalStruct, err)
+		return fmt.Errorf("%w: %s", ErrMarshalStruct, err)
 	}
 	if err := yaml.Unmarshal(raw, out); err != nil {
-		return fmt.Errorf("%w: %v", ErrParseYAML, err)
+		return fmt.Errorf("%w: %s", ErrParseYAML, err)
 	}
 	return nil
 }

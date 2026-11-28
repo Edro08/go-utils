@@ -148,3 +148,48 @@ func TestParseRSAPublicKeyFromPEMFile(t *testing.T) {
 		})
 	}
 }
+
+func TestParseRSAKeysFromPEM(t *testing.T) {
+	privPath, pubPath, invalidPath := generateTestRSAFiles(t)
+
+	privBytes, err := os.ReadFile(privPath)
+	if err != nil {
+		t.Fatalf("failed to read generated private pem: %v", err)
+	}
+	pubBytes, err := os.ReadFile(pubPath)
+	if err != nil {
+		t.Fatalf("failed to read generated public pem: %v", err)
+	}
+	invalidBytes, err := os.ReadFile(invalidPath)
+	if err != nil {
+		t.Fatalf("failed to read generated invalid pem: %v", err)
+	}
+
+	t.Run("Valid private PEM bytes", func(t *testing.T) {
+		key, err := ParseRSAPrivateKeyFromPEM(privBytes)
+		if err != nil || key == nil {
+			t.Errorf("ParseRSAPrivateKeyFromPEM() = (%v, %v), want non-nil key and nil error", key, err)
+		}
+	})
+
+	t.Run("Invalid private PEM bytes returns ErrParsePrivateKey", func(t *testing.T) {
+		_, err := ParseRSAPrivateKeyFromPEM(invalidBytes)
+		if !errors.Is(err, ErrParsePrivateKey) {
+			t.Errorf("ParseRSAPrivateKeyFromPEM() error = %v, want %v", err, ErrParsePrivateKey)
+		}
+	})
+
+	t.Run("Valid public PEM bytes", func(t *testing.T) {
+		key, err := ParseRSAPublicKeyFromPEM(pubBytes)
+		if err != nil || key == nil {
+			t.Errorf("ParseRSAPublicKeyFromPEM() = (%v, %v), want non-nil key and nil error", key, err)
+		}
+	})
+
+	t.Run("Invalid public PEM bytes returns ErrParsePublicKey", func(t *testing.T) {
+		_, err := ParseRSAPublicKeyFromPEM(invalidBytes)
+		if !errors.Is(err, ErrParsePublicKey) {
+			t.Errorf("ParseRSAPublicKeyFromPEM() error = %v, want %v", err, ErrParsePublicKey)
+		}
+	})
+}

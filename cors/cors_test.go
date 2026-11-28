@@ -53,6 +53,16 @@ func TestNewCors(t *testing.T) {
 			targetErr: ErrWildcardWithCredentials,
 		},
 		{
+			name: "Wildcard exposed headers with credentials returns ErrWildcardExposedHeadersWithCredentials",
+			options: Options{
+				AllowedOrigins:   []string{"https://example.com"},
+				ExposedHeaders:   []string{"*"},
+				AllowCredentials: true,
+			},
+			wantErr:   true,
+			targetErr: ErrWildcardExposedHeadersWithCredentials,
+		},
+		{
 			name: "Negative MaxAge returns ErrInvalidMaxAge",
 			options: Options{
 				AllowedOrigins: []string{"https://example.com"},
@@ -172,7 +182,7 @@ func TestCors_Middleware(t *testing.T) {
 		}
 	})
 
-	t.Run("Preflight OPTIONS with disallowed method returns 405", func(t *testing.T) {
+	t.Run("Preflight OPTIONS with disallowed method returns 405 without CORS allow headers", func(t *testing.T) {
 		req := httptest.NewRequest(http.MethodOptions, "/api/data", nil)
 		req.Header.Set(originHeader, "https://app.example.com")
 		req.Header.Set(requestMethod, "DELETE")
@@ -183,9 +193,18 @@ func TestCors_Middleware(t *testing.T) {
 		if rec.Code != http.StatusMethodNotAllowed {
 			t.Errorf("expected status 405 for disallowed method, got %d", rec.Code)
 		}
+		if rec.Header().Get(allowOriginHeader) != "" {
+			t.Errorf("allowOriginHeader should not be set on rejected preflight, got %q", rec.Header().Get(allowOriginHeader))
+		}
+		if rec.Header().Get(allowCredentialsHeader) != "" {
+			t.Errorf("allowCredentialsHeader should not be set on rejected preflight, got %q", rec.Header().Get(allowCredentialsHeader))
+		}
+		if rec.Header().Get(exposeHeadersHeader) != "" {
+			t.Errorf("exposeHeadersHeader should not be set on rejected preflight, got %q", rec.Header().Get(exposeHeadersHeader))
+		}
 	})
 
-	t.Run("Preflight OPTIONS with disallowed request headers returns 403", func(t *testing.T) {
+	t.Run("Preflight OPTIONS with disallowed request headers returns 403 without CORS allow headers", func(t *testing.T) {
 		req := httptest.NewRequest(http.MethodOptions, "/api/data", nil)
 		req.Header.Set(originHeader, "https://app.example.com")
 		req.Header.Set(requestMethod, "POST")
@@ -197,19 +216,44 @@ func TestCors_Middleware(t *testing.T) {
 		if rec.Code != http.StatusForbidden {
 			t.Errorf("expected status 403 for disallowed request headers, got %d", rec.Code)
 		}
+		if rec.Header().Get(allowOriginHeader) != "" {
+			t.Errorf("allowOriginHeader should not be set on rejected preflight, got %q", rec.Header().Get(allowOriginHeader))
+		}
+		if rec.Header().Get(allowCredentialsHeader) != "" {
+			t.Errorf("allowCredentialsHeader should not be set on rejected preflight, got %q", rec.Header().Get(allowCredentialsHeader))
+		}
 	})
 
-	t.Run("Valid Preflight OPTIONS returns 204 No Content with CORS headers", func(t *testing.T) {
+	t.Run("Preflight OPTIONS with multiple Access-Control-Request-Headers lines validates all of them", func(t *testing.T) {
 		req := httptest.NewRequest(http.MethodOptions, "/api/data", nil)
 		req.Header.Set(originHeader, "https://app.example.com")
 		req.Header.Set(requestMethod, "POST")
-		req.Header.Set(requestHeaders, "Content-Type, Authorization")
+		req.Header.Add(requestHeaders, "Content-Type")
+		req.Header.Add(requestHeaders, "X-Disallowed-Second-Line")
+		rec := httptest.NewRecorder()
+
+		handler.ServeHTTP(rec, req)
+
+		if rec.Code != http.StatusForbidden {
+			t.Errorf("expected status 403 when second request header line is disallowed, got %d", rec.Code)
+		}
+	})
+
+	t.Run("Valid Preflight OPTIONS returns 204 No Content with CORS headers and non-duplicated Vary", func(t *testing.T) {
+		req := httptest.NewRequest(http.MethodOptions, "/api/data", nil)
+		req.Header.Set(originHeader, "https://app.example.com")
+		req.Header.Set(requestMethod, "POST")
+		req.Header.Add(requestHeaders, "Content-Type")
+		req.Header.Add(requestHeaders, "Authorization")
 		rec := httptest.NewRecorder()
 
 		handler.ServeHTTP(rec, req)
 
 		if rec.Code != http.StatusNoContent {
 			t.Errorf("expected status 204, got %d", rec.Code)
+		}
+		if rec.Header().Get(allowOriginHeader) != "https://app.example.com" {
+			t.Errorf("allowOriginHeader = %q, want %q", rec.Header().Get(allowOriginHeader), "https://app.example.com")
 		}
 		if rec.Header().Get(allowMethodsHeader) == "" {
 			t.Error("allowMethodsHeader should be set on preflight")
@@ -219,6 +263,67 @@ func TestCors_Middleware(t *testing.T) {
 		}
 		if rec.Header().Get(maxAgeHeader) != "7200" {
 			t.Errorf("maxAgeHeader = %q, want '7200'", rec.Header().Get(maxAgeHeader))
+		}
+		if rec.Header().Get(exposeHeadersHeader) != "" {
+			t.Errorf("exposeHeadersHeader should not be set on preflight, got %q", rec.Header().Get(exposeHeadersHeader))
+		}
+
+		expectedVary := []string{originHeader, requestMethod, requestHeaders}
+		if gotVary := rec.Header().Values("Vary"); !reflect.DeepEqual(gotVary, expectedVary) {
+			t.Errorf("Vary headers = %v, want %v", gotVary, expectedVary)
+		}
+	})
+
+	t.Run("Mutating caller Options slices after NewCors does not affect middleware", func(t *testing.T) {
+		origins := []string{"https://immutable.example.com"}
+		methods := []string{"GET"}
+		headers := []string{"X-Safe"}
+
+		isolatedCors, err := NewCors(Options{
+			AllowedOrigins: origins,
+			AllowedMethods: methods,
+			AllowedHeaders: headers,
+		})
+		if err != nil {
+			t.Fatalf("failed to create cors instance: %v", err)
+		}
+
+		origins[0] = "https://hijacked.example.com"
+		methods[0] = "DELETE"
+		headers[0] = "X-Evil"
+
+		isolatedHandler := isolatedCors.Middleware(nextHandler)
+		req := httptest.NewRequest(http.MethodGet, "/api/data", nil)
+		req.Header.Set(originHeader, "https://immutable.example.com")
+		rec := httptest.NewRecorder()
+
+		isolatedHandler.ServeHTTP(rec, req)
+
+		if rec.Code != http.StatusOK {
+			t.Errorf("expected status 200 for original origin after slice mutation, got %d", rec.Code)
+		}
+	})
+
+	t.Run("Mixed AllowedOrigins with wildcard still sets Vary Origin on fallback", func(t *testing.T) {
+		mixedCors, err := NewCors(Options{
+			AllowedOrigins: []string{"https://app.example.com", "*"},
+		})
+		if err != nil {
+			t.Fatalf("failed to create mixed cors instance: %v", err)
+		}
+
+		mixedHandler := mixedCors.Middleware(nextHandler)
+		req := httptest.NewRequest(http.MethodGet, "/api/data", nil)
+		req.Header.Set(originHeader, "https://other.example.com")
+		rec := httptest.NewRecorder()
+
+		mixedHandler.ServeHTTP(rec, req)
+
+		if rec.Header().Get(allowOriginHeader) != Default {
+			t.Errorf("allowOriginHeader = %q, want %q", rec.Header().Get(allowOriginHeader), Default)
+		}
+		if gotVary := rec.Header().Values("Vary"); !reflect.DeepEqual(gotVary, []string{originHeader}) {
+			t.Errorf("Vary headers = %v, want [%s]", gotVary, originHeader)
 		}
 	})
 }
@@ -306,11 +411,11 @@ func Test_hasEmptyValues(t *testing.T) {
 
 func Test_isMatchFold(t *testing.T) {
 	tests := []struct {
-		name  string
+		name   string
 		target string
 		values []string
-		want  string
-		want1 bool
+		want   string
+		want1  bool
 	}{
 		{"Exact match", "GET", []string{"GET", "POST"}, "GET", true},
 		{"Case-insensitive match", "content-type", []string{"Content-Type"}, "Content-Type", true},

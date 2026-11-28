@@ -85,26 +85,59 @@ func (l *Logger) exitProcess(code int) {
 	os.Exit(code)
 }
 
-// Slog retorna la instancia interna de *slog.Logger de la librería estándar.
+// Slog retorna la instancia interna de *slog.Logger de la librería estándar,
+// preservando atributos y grupos derivados si existen.
 func (l *Logger) Slog() *slog.Logger {
-	return l.slog
+	s := l.slog
+	if len(l.attrs) > 0 {
+		anyAttrs := make([]any, len(l.attrs))
+		for i, a := range l.attrs {
+			anyAttrs[i] = a
+		}
+		s = s.With(anyAttrs...)
+	}
+	for _, g := range l.groups {
+		s = s.WithGroup(g)
+	}
+	return s
 }
 
-// With retorna un nuevo ILogger derivado que incluye atributos contextuales fijos.
+// With retorna un nuevo ILogger derivado cuyos atributos fijos se agregan al final de cada registro.
 func (l *Logger) With(args ...any) ILogger {
+	added := wrapGroups(l.groups, argsToAttrs(args...))
+	if len(added) == 0 {
+		return l
+	}
+
+	nextAttrs := make([]slog.Attr, 0, len(l.attrs)+len(added))
+	nextAttrs = append(nextAttrs, l.attrs...)
+	nextAttrs = append(nextAttrs, added...)
+
 	return &Logger{
 		opts:   l.opts,
-		slog:   l.slog.With(args...),
+		slog:   l.slog,
+		attrs:  nextAttrs,
+		groups: l.groups,
 		closer: l.closer,
 		exit:   l.exit,
 	}
 }
 
-// WithGroup retorna un nuevo ILogger derivado que agrupa los atributos bajo un grupo.
+// WithGroup retorna un nuevo ILogger derivado que agrupa los atributos subsecuentes bajo un grupo.
 func (l *Logger) WithGroup(name string) ILogger {
+	if name == "" {
+		return l
+	}
+
+	nextGroups := make([]string, 0, len(l.groups)+1)
+	nextGroups = append(nextGroups, l.groups...)
+	nextGroups = append(nextGroups, name)
+
 	return &Logger{
 		opts:   l.opts,
-		slog:   l.slog.WithGroup(name),
+		slog:   l.slog,
+		attrs:  l.attrs,
+		groups: nextGroups,
 		closer: l.closer,
 		exit:   l.exit,
 	}
@@ -150,7 +183,8 @@ func (l *Logger) write(level Level, title string, keysVals ...any) {
 	l.writeRecord(context.Background(), level, pc, title, keysVals...)
 }
 
-// writeRecord delega la creación del registro a log/slog inyectando atributos de contexto si aplica.
+// writeRecord delega la creación del registro a log/slog colocando primero los atributos del evento
+// y al final los atributos de contexto y del logger derivado (With).
 func (l *Logger) writeRecord(ctx context.Context, level Level, pc uintptr, title string, keysVals ...any) {
 	if ctx == nil {
 		ctx = context.Background()
@@ -162,12 +196,50 @@ func (l *Logger) writeRecord(ctx context.Context, level Level, pc uintptr, title
 	}
 
 	record := slog.NewRecord(time.Now(), slogLevel, title, pc)
+	if len(keysVals) > 0 {
+		if len(l.groups) == 0 {
+			record.Add(keysVals...)
+		} else {
+			record.AddAttrs(wrapGroups(l.groups, argsToAttrs(keysVals...))...)
+		}
+	}
 	if l.opts.ContextExtractor != nil {
 		if attrs := l.opts.ContextExtractor(ctx); len(attrs) > 0 {
 			record.AddAttrs(attrs...)
 		}
 	}
-	record.Add(keysVals...)
+	if len(l.attrs) > 0 {
+		record.AddAttrs(l.attrs...)
+	}
 
 	_ = l.slog.Handler().Handle(ctx, record)
+}
+
+func argsToAttrs(args ...any) []slog.Attr {
+	if len(args) == 0 {
+		return nil
+	}
+	var r slog.Record
+	r.Add(args...)
+	attrs := make([]slog.Attr, 0, r.NumAttrs())
+	r.Attrs(func(a slog.Attr) bool {
+		attrs = append(attrs, a)
+		return true
+	})
+	return attrs
+}
+
+func wrapGroups(groups []string, attrs []slog.Attr) []slog.Attr {
+	if len(groups) == 0 || len(attrs) == 0 {
+		return attrs
+	}
+	grouped := attrs
+	for i := len(groups) - 1; i >= 0; i-- {
+		anyAttrs := make([]any, len(grouped))
+		for j, a := range grouped {
+			anyAttrs[j] = a
+		}
+		grouped = []slog.Attr{slog.Group(groups[i], anyAttrs...)}
+	}
+	return grouped
 }

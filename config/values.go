@@ -439,6 +439,9 @@ func parseInt(value interface{}) (int, bool) {
 		if strconv.IntSize == 32 && v > math.MaxInt32 {
 			return 0, false
 		}
+		if strconv.IntSize == 64 && uint64(v) > math.MaxInt64 {
+			return 0, false
+		}
 		return int(v), true
 	case uint8:
 		return int(v), true

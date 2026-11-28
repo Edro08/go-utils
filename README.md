@@ -113,10 +113,15 @@ opts := cors.Options{
 	AllowedOrigins:   []string{"https://example.com"},
 	AllowedMethods:   []string{"GET", "POST", "OPTIONS"},
 	AllowedHeaders:   []string{"Content-Type", "Authorization"},
+	ExposedHeaders:   []string{"X-Total-Count"},
 	AllowCredentials: true,
+	MaxAge:           3600,
 }
 
-handler := cors.NewCors(opts)
+handler, err := cors.NewCors(opts)
+if err != nil {
+	panic(err)
+}
 ```
 
 - ***Opcional:*** Envolver tu mux o handler principal
@@ -127,7 +132,7 @@ http.ListenAndServe(":8080", handler.Middleware(mux))
 
 ### 🧊 JWT
 
-- Importar el paquete
+- Importar el paquete (soporta `HS256`/`HS384`/`HS512`, `RS256`/`RS384`/`RS512`, `PS256`/`PS384`/`PS512`, `ES256`/`ES384`/`ES512` y `EdDSA`)
 
 ```go
 import (
@@ -135,31 +140,42 @@ import (
 )
 ```
 
-- Crear y firmar un token con `jwt.New`
+- Firmar un token con `jwt.Sign`
 
 ```go
-token := jwt.New(jwt.NewTokenOpts{
-	Algorithm:      jwt.RS256,
-	Issuer:         "api",
-	Subject:        "user-123",
-	ExpiredEnabled: true,
-	ExpiredTime:    1 * time.Hour,
+key, _ := jwt.ParseRSAPrivateKeyFromPEMFile("private.pem") // o jwt.ParseRSAPrivateKeyFromPEM(bytes)
+
+signed, err := jwt.Sign(jwt.SignOptions{
+	ID:            "token-123",
+	Algorithm:     jwt.RS256,
+	Key:           key,
+	Issuer:        "api",
+	Subject:       "user-123",
+	Audience:      []string{"web-app"},
+	Expiration:    1 * time.Hour,
+	CustomHeaders: map[string]string{"kid": "key-2026-01"},
+	CustomClaims:  map[string]any{"role": "admin"},
 })
-
-key, _ := jwt.ParseRSAPrivateKeyFromPEMFile("private.pem")
-signed, _ := token.Sign(key)
 ```
 
-- Verificar un token
+- Verificar un token y obtener sus claims con `jwt.Verify`
 
 ```go
-err := jwt.Verify(signed, &key.PublicKey)
+claims, err := jwt.Verify(jwt.VerifyOptions{
+	Token:     signed,
+	Algorithm: jwt.RS256,
+	Key:       &key.PublicKey,
+	Issuer:    "api",           // Opcional
+	Subject:   "user-123",      // Opcional
+	Audience:  "web-app",       // Opcional
+	Leeway:    5 * time.Second, // Opcional
+})
 ```
 
-- Parsear sin verificar
+- Inspeccionar claims y headers sin verificar firma (ej. para leer `kid` antes de llamar a `Verify`)
 
 ```go
-claims, _ := jwt.Parse(signed)
+rawClaims, headers, err := jwt.ParseUnverified(signed)
 ```
 
 ### 🧊 Cifrado RSA
@@ -172,11 +188,11 @@ import (
 )
 ```
 
-- Cifrar y descifrar con RSA
+- Cifrar y descifrar con RSA-OAEP SHA-256 (soporta llaves privadas PKCS#1/PKCS#8 y públicas PKIX/PKCS#1)
 
 ```go
-privKey, _ := rsa.ParsePrivateKeyFromPEMFile("private.pem")
-pubKey, _  := rsa.ParsePublicKeyFromPEMFile("public.pem")
+privKey, _ := rsa.ParsePrivateKeyFromPEMFile("private.pem") // o rsa.ParsePrivateKeyFromPEM(bytes)
+pubKey, _  := rsa.ParsePublicKeyFromPEMFile("public.pem")   // o rsa.ParsePublicKeyFromPEM(bytes)
 
 ciphertext, _ := rsa.Encrypt(pubKey, []byte("mensaje secreto"))
 plaintext, _  := rsa.Decrypt(privKey, ciphertext)
@@ -195,7 +211,7 @@ import (
 - Cifrar y descifrar con AES-GCM
 
 ```go
-key := []byte("32-byte-key-here-1234567890abcd")
+key := []byte("32-byte-key-here-1234567890abcde")
 
 ciphertext, _ := aesgcm.Encrypt(key, []byte("mensaje secreto"))
 plaintext, _  := aesgcm.Decrypt(key, ciphertext)
@@ -214,7 +230,7 @@ import (
 - Cifrar y descifrar con AES-CBC
 
 ```go
-key := []byte("32-byte-key-here-1234567890abcd")
+key := []byte("32-byte-key-here-1234567890abcde")
 iv  := []byte("16-byte-iv-here!")
 
 ciphertext, _ := aescbc.Encrypt(key, iv, []byte("mensaje secreto"))

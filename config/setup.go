@@ -11,13 +11,13 @@ import (
 )
 
 var (
-	ErrKeyEmpty      = errors.New("key cannot be empty")
-	ErrReadFile      = errors.New("failed to read config file")
-	ErrMarshalStruct = errors.New("failed to marshal struct")
-	ErrParseYAML     = errors.New("failed to parse YAML")
-	ErrMapKeyType    = errors.New("map key must be string")
-	ErrInvalidTarget = errors.New("unmarshal target must be a non-nil pointer")
-	ErrKeyNotFound   = errors.New("configuration key not found")
+	ErrKeyEmpty      = errors.New("config: key cannot be empty")
+	ErrReadFile      = errors.New("config: failed to read config file")
+	ErrMarshalStruct = errors.New("config: failed to marshal struct")
+	ErrParseYAML     = errors.New("config: failed to parse YAML")
+	ErrMapKeyType    = errors.New("config: map key must be string")
+	ErrInvalidTarget = errors.New("config: unmarshal target must be a non-nil pointer")
+	ErrKeyNotFound   = errors.New("config: configuration key not found")
 )
 
 const (
@@ -53,7 +53,7 @@ func New(opts Options) *Config {
 func (c *Config) LoadFile(path string) error {
 	data, err := os.ReadFile(path)
 	if err != nil {
-		return fmt.Errorf("%w: %v", ErrReadFile, err)
+		return fmt.Errorf("%w: %s", ErrReadFile, err)
 	}
 
 	return c.LoadBytes(data)
@@ -87,7 +87,7 @@ func (c *Config) LoadBytes(data []byte) error {
 func (c *Config) LoadStruct(s interface{}) error {
 	data, err := yaml.Marshal(s)
 	if err != nil {
-		return fmt.Errorf("%w: %v", ErrMarshalStruct, err)
+		return fmt.Errorf("%w: %s", ErrMarshalStruct, err)
 	}
 
 	m, err := unmarshalToMap(data)
@@ -125,7 +125,7 @@ func deepMerge(dst, src map[string]interface{}) {
 func unmarshalToMap(data []byte) (map[string]interface{}, error) {
 	var m map[string]interface{}
 	if err := yaml.Unmarshal(data, &m); err != nil {
-		return nil, fmt.Errorf("%w: %v", ErrParseYAML, err)
+		return nil, fmt.Errorf("%w: %s", ErrParseYAML, err)
 	}
 	if m == nil {
 		return nil, nil
@@ -171,15 +171,23 @@ func expandEnvWithDefaults(input string) string {
 }
 
 func resolveEnvExpr(expr string) string {
-	if idx := strings.Index(expr, ":-"); idx > 0 {
-		name := expr[:idx]
-		def := expr[idx+2:]
-		if val, ok := os.LookupEnv(name); ok && val != "" {
-			return val
-		}
-		return def
+	if expr == "" {
+		return ""
 	}
+
 	if idx := strings.IndexByte(expr, '-'); idx > 0 {
+		if expr[idx-1] == ':' {
+			name := expr[:idx-1]
+			if name == "" {
+				return ""
+			}
+			def := expr[idx+1:]
+			if val, ok := os.LookupEnv(name); ok && val != "" {
+				return val
+			}
+			return def
+		}
+
 		name := expr[:idx]
 		def := expr[idx+1:]
 		if val, ok := os.LookupEnv(name); ok {
@@ -187,8 +195,6 @@ func resolveEnvExpr(expr string) string {
 		}
 		return def
 	}
-	if expr == "" {
-		return ""
-	}
+
 	return os.Getenv(expr)
 }

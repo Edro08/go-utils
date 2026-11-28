@@ -133,7 +133,8 @@ func TestLogger_ContextMethods(t *testing.T) {
 	l.DebugCtx(ctx, "CTX_DEBUG")
 	l.InfoCtx(ctx, "CTX_INFO", "step", 1)
 	l.WarnCtx(ctx, "CTX_WARN")
-	l.ErrorCtx(nil, "CTX_NIL_SAFE")
+	var nilCtx context.Context
+	l.ErrorCtx(nilCtx, "CTX_NIL_SAFE")
 
 	out := buf.String()
 	for _, expected := range []string{"CTX_DEBUG", "CTX_INFO", "CTX_WARN", "CTX_NIL_SAFE", "trace_id=tr-abc-123", "step=1"} {
@@ -201,14 +202,62 @@ func TestLogger_SlogAndDerived(t *testing.T) {
 	}
 
 	var iface ILogger = l
+	if same := iface.With(); same != l {
+		t.Error("With() without args should return receiver")
+	}
+	if same := iface.WithGroup(""); same != l {
+		t.Error("WithGroup(\"\") should return receiver")
+	}
+
 	derived := iface.With("service", "billing").WithGroup("meta")
-	if derived == nil {
-		t.Fatal("With().WithGroup() returned nil")
+	if derived == nil || derived.Slog() == nil {
+		t.Fatal("With().WithGroup() or Slog() returned nil")
 	}
 
 	derived.Info("TRANSACTION", "id", "tx-999")
 	out := buf.String()
 	if !strings.Contains(out, "service=billing") || !strings.Contains(out, "meta.id=tx-999") {
 		t.Errorf("derived logger output = %q, missing contextual/grouped attributes", out)
+	}
+
+	buf.Reset()
+	groupedWith := iface.WithGroup("meta").With("env", "prod")
+	groupedWith.Info("DEPLOY", "ok", true)
+	if !strings.Contains(buf.String(), "meta.env=prod") || !strings.Contains(buf.String(), "meta.ok=true") {
+		t.Errorf("groupedWith output = %q, expected grouped attributes", buf.String())
+	}
+}
+
+func TestLogger_TrailingAttributeOrder(t *testing.T) {
+	buf := &bytes.Buffer{}
+	root, err := New(Options{
+		MinLevel: INFO,
+		Format:   FormatJSON,
+		Writer:   buf,
+		ContextExtractor: func(ctx context.Context) []slog.Attr {
+			if v, ok := ctx.Value(traceKey).(string); ok && v != "" {
+				return []slog.Attr{slog.String("traceID", v)}
+			}
+			return nil
+		},
+	})
+	if err != nil {
+		t.Fatalf("New() error: %v", err)
+	}
+
+	appLog := root.With("instanceID", "inst-001")
+	ctx := context.WithValue(t.Context(), traceKey, "tr-999")
+	appLog.InfoCtx(ctx, "MAIN", "status", "Start server in port 8080")
+
+	out := buf.String()
+	statusIdx := strings.Index(out, `"status":"Start server in port 8080"`)
+	traceIdx := strings.Index(out, `"traceID":"tr-999"`)
+	instIdx := strings.Index(out, `"instanceID":"inst-001"}`)
+
+	if statusIdx == -1 || traceIdx == -1 || instIdx == -1 {
+		t.Fatalf("unexpected JSON output: %s", out)
+	}
+	if statusIdx >= traceIdx || traceIdx >= instIdx {
+		t.Fatalf("expected order status < traceID < instanceID (at end), got: %s", out)
 	}
 }

@@ -6,7 +6,16 @@ import (
 )
 
 // setAllowMethodsHeader establece Access-Control-Allow-Methods.
-func (c *Cors) setAllowMethodsHeader(w http.ResponseWriter) {
+// Cuando AllowCredentials está activo y se configuró wildcard ("*"),
+// refleja el método solicitado en lugar de enviar "*" para cumplir con la spec CORS.
+func (c *Cors) setAllowMethodsHeader(w http.ResponseWriter, requestedMethod string) {
+	if c.hasWildcardMethod && c.options.AllowCredentials {
+		if requestedMethod != "" {
+			w.Header().Set(allowMethodsHeader, strings.ToUpper(requestedMethod))
+		}
+		return
+	}
+
 	if c.formattedMethods == "" {
 		return
 	}
@@ -28,7 +37,7 @@ func (c *Cors) setAllowHeadersHeader(w http.ResponseWriter, requestedHeaders []s
 	if c.hasWildcardHeader {
 		if len(requestedHeaders) > 0 {
 			w.Header().Set(allowHeadersHeader, strings.Join(requestedHeaders, ", "))
-		} else {
+		} else if !c.options.AllowCredentials {
 			w.Header().Set(allowHeadersHeader, Default)
 		}
 		return
@@ -62,7 +71,7 @@ func (c *Cors) setAllowOriginHeader(
 ) {
 	w.Header().Set(allowOriginHeader, origin)
 
-	if origin != Default {
+	if origin != Default || c.varyOrigin {
 		addVary(w, originHeader)
 	}
 }
@@ -75,9 +84,28 @@ func (c *Cors) setPreflightVaryHeaders(w http.ResponseWriter) {
 	addVary(w, requestHeaders)
 }
 
-// addVary agrega un valor al header Vary sin sobrescribir valores existentes.
+// addVary agrega un valor al header Vary evitando duplicados.
 func addVary(w http.ResponseWriter, value string) {
+	for _, existing := range w.Header().Values("Vary") {
+		if strings.EqualFold(existing, value) {
+			return
+		}
+	}
+
 	w.Header().Add("Vary", value)
+}
+
+// extractRequestHeaders extrae y normaliza todos los valores de
+// Access-Control-Request-Headers, soportando múltiples líneas de header.
+func extractRequestHeaders(headerValues []string) []string {
+	var result []string
+
+	for _, raw := range headerValues {
+		parsed := splitAndTrim(raw)
+		result = append(result, parsed...)
+	}
+
+	return result
 }
 
 // splitAndTrim separa una lista de valores delimitada por comas,

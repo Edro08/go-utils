@@ -339,3 +339,79 @@ func TestParsePublicKeyFromPEMFile(t *testing.T) {
 		})
 	}
 }
+
+func TestParseKeys_PKCS8AndPKCS1Formats(t *testing.T) {
+	priv, pub, _, _ := generateTestKeyPair(t)
+
+	pkcs8Bytes, err := x509.MarshalPKCS8PrivateKey(priv)
+	if err != nil {
+		t.Fatalf("failed to marshal PKCS8 private key: %v", err)
+	}
+	pkcs8PEM := pem.EncodeToMemory(&pem.Block{
+		Type:  "PRIVATE KEY",
+		Bytes: pkcs8Bytes,
+	})
+
+	ecdsaKey, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
+	if err != nil {
+		t.Fatalf("failed to generate ecdsa key: %v", err)
+	}
+	ecdsaPKCS8Bytes, err := x509.MarshalPKCS8PrivateKey(ecdsaKey)
+	if err != nil {
+		t.Fatalf("failed to marshal ecdsa PKCS8 private key: %v", err)
+	}
+	ecdsaPKCS8PEM := pem.EncodeToMemory(&pem.Block{
+		Type:  "PRIVATE KEY",
+		Bytes: ecdsaPKCS8Bytes,
+	})
+
+	corruptedPKCS8PEM := pem.EncodeToMemory(&pem.Block{
+		Type:  "PRIVATE KEY",
+		Bytes: []byte("corrupted-pkcs8"),
+	})
+
+	pkcs1PubPEM := pem.EncodeToMemory(&pem.Block{
+		Type:  "RSA PUBLIC KEY",
+		Bytes: x509.MarshalPKCS1PublicKey(pub),
+	})
+
+	corruptedPKCS1PubPEM := pem.EncodeToMemory(&pem.Block{
+		Type:  "RSA PUBLIC KEY",
+		Bytes: []byte("corrupted-pkcs1-pub"),
+	})
+
+	t.Run("Valid PKCS8 RSA private key", func(t *testing.T) {
+		got, err := ParsePrivateKeyFromPEM(pkcs8PEM)
+		if err != nil || got == nil {
+			t.Errorf("ParsePrivateKeyFromPEM(PKCS8) = (%v, %v), want valid key", got, err)
+		}
+	})
+
+	t.Run("Non-RSA PKCS8 private key returns ErrParsePrivateKey", func(t *testing.T) {
+		_, err := ParsePrivateKeyFromPEM(ecdsaPKCS8PEM)
+		if !errors.Is(err, ErrParsePrivateKey) {
+			t.Errorf("ParsePrivateKeyFromPEM(ECDSA PKCS8) error = %v, want %v", err, ErrParsePrivateKey)
+		}
+	})
+
+	t.Run("Corrupted PKCS8 private key returns ErrParsePrivateKey", func(t *testing.T) {
+		_, err := ParsePrivateKeyFromPEM(corruptedPKCS8PEM)
+		if !errors.Is(err, ErrParsePrivateKey) {
+			t.Errorf("ParsePrivateKeyFromPEM(corrupted PKCS8) error = %v, want %v", err, ErrParsePrivateKey)
+		}
+	})
+
+	t.Run("Valid PKCS1 RSA public key", func(t *testing.T) {
+		got, err := ParsePublicKeyFromPEM(pkcs1PubPEM)
+		if err != nil || got == nil {
+			t.Errorf("ParsePublicKeyFromPEM(PKCS1) = (%v, %v), want valid key", got, err)
+		}
+	})
+
+	t.Run("Corrupted PKCS1 RSA public key returns ErrParsePublicKey", func(t *testing.T) {
+		_, err := ParsePublicKeyFromPEM(corruptedPKCS1PubPEM)
+		if !errors.Is(err, ErrParsePublicKey) {
+			t.Errorf("ParsePublicKeyFromPEM(corrupted PKCS1) error = %v, want %v", err, ErrParsePublicKey)
+		}
+	})
+}

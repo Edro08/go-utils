@@ -40,11 +40,12 @@ func TestCors_setAllowCredentialsHeader(t *testing.T) {
 
 func TestCors_setAllowHeadersHeader(t *testing.T) {
 	tests := []struct {
-		name              string
-		hasWildcard       bool
-		formattedHeaders  string
-		requestedHeaders  []string
-		wantHeader        string
+		name             string
+		hasWildcard      bool
+		allowCreds       bool
+		formattedHeaders string
+		requestedHeaders []string
+		wantHeader       string
 	}{
 		{
 			name:             "Wildcard with requested headers mirrors requested",
@@ -57,6 +58,13 @@ func TestCors_setAllowHeadersHeader(t *testing.T) {
 			hasWildcard:      true,
 			requestedHeaders: nil,
 			wantHeader:       Default,
+		},
+		{
+			name:             "Wildcard without requested headers and AllowCredentials true omits header",
+			hasWildcard:      true,
+			allowCreds:       true,
+			requestedHeaders: nil,
+			wantHeader:       "",
 		},
 		{
 			name:             "Configured formatted headers",
@@ -76,6 +84,7 @@ func TestCors_setAllowHeadersHeader(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			c := &Cors{
+				options:           Options{AllowCredentials: tt.allowCreds},
 				hasWildcardHeader: tt.hasWildcard,
 				formattedHeaders:  tt.formattedHeaders,
 			}
@@ -91,13 +100,17 @@ func TestCors_setAllowHeadersHeader(t *testing.T) {
 
 func TestCors_setAllowMethodsHeader(t *testing.T) {
 	tests := []struct {
-		name             string
-		formattedMethods string
-		wantHeader       string
+		name              string
+		formattedMethods  string
+		hasWildcardMethod bool
+		allowCredentials  bool
+		requestedMethod   string
+		wantHeader        string
 	}{
 		{
 			name:             "Formatted methods present sets header",
 			formattedMethods: "GET, POST, OPTIONS",
+			requestedMethod:  "POST",
 			wantHeader:       "GET, POST, OPTIONS",
 		},
 		{
@@ -105,12 +118,32 @@ func TestCors_setAllowMethodsHeader(t *testing.T) {
 			formattedMethods: "",
 			wantHeader:       "",
 		},
+		{
+			name:              "Wildcard method with AllowCredentials mirrors requested method in uppercase",
+			formattedMethods:  "*",
+			hasWildcardMethod: true,
+			allowCredentials:  true,
+			requestedMethod:   "patch",
+			wantHeader:        "PATCH",
+		},
+		{
+			name:              "Wildcard method without AllowCredentials sets wildcard",
+			formattedMethods:  "*",
+			hasWildcardMethod: true,
+			allowCredentials:  false,
+			requestedMethod:   "PATCH",
+			wantHeader:        "*",
+		},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			c := &Cors{formattedMethods: tt.formattedMethods}
+			c := &Cors{
+				options:           Options{AllowCredentials: tt.allowCredentials},
+				formattedMethods:  tt.formattedMethods,
+				hasWildcardMethod: tt.hasWildcardMethod,
+			}
 			w := httptest.NewRecorder()
-			c.setAllowMethodsHeader(w)
+			c.setAllowMethodsHeader(w, tt.requestedMethod)
 			got := w.Header().Get(allowMethodsHeader)
 			if got != tt.wantHeader {
 				t.Errorf("setAllowMethodsHeader() = %v, want %v", got, tt.wantHeader)
@@ -235,11 +268,45 @@ func Test_addVary(t *testing.T) {
 	w := httptest.NewRecorder()
 	addVary(w, "Accept-Encoding")
 	addVary(w, "Origin")
+	addVary(w, "origin")
 
 	varyValues := w.Header().Values("Vary")
 	expected := []string{"Accept-Encoding", "Origin"}
 	if !reflect.DeepEqual(varyValues, expected) {
 		t.Errorf("addVary() = %v, want %v", varyValues, expected)
+	}
+}
+
+func Test_extractRequestHeaders(t *testing.T) {
+	tests := []struct {
+		name   string
+		values []string
+		want   []string
+	}{
+		{
+			name:   "Empty values returns nil",
+			values: nil,
+			want:   nil,
+		},
+		{
+			name:   "Single header with comma-separated values",
+			values: []string{"Content-Type, Authorization"},
+			want:   []string{"Content-Type", "Authorization"},
+		},
+		{
+			name:   "Multiple header lines combined and trimmed",
+			values: []string{"Content-Type, X-Trace-ID", " Authorization , X-Custom "},
+			want:   []string{"Content-Type", "X-Trace-ID", "Authorization", "X-Custom"},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := extractRequestHeaders(tt.values)
+			if !reflect.DeepEqual(got, tt.want) {
+				t.Errorf("extractRequestHeaders() = %v, want %v", got, tt.want)
+			}
+		})
 	}
 }
 

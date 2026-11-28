@@ -287,6 +287,7 @@ database:
   user: "${TEST_EMPTY_VAR:-postgres}"
   pass: "${TEST_EMPTY_VAR-fallbackNotUsed}"
   unsetDash: "${TEST_UNSET_VAR-fallbackUsed}"
+  unsetDashWithColonDash: "${TEST_UNSET_VAR-foo:-bar}"
   bcryptHash: "$2a$10$unbracedDollarPreserved"
   escaped: "$${NOT_EXPANDED}"
 `
@@ -314,6 +315,9 @@ database:
 	}
 	if got := cfg.GetString("database.unsetDash"); got != "fallbackUsed" {
 		t.Errorf("unsetDash = %q, want fallbackUsed", got)
+	}
+	if got := cfg.GetString("database.unsetDashWithColonDash"); got != "foo:-bar" {
+		t.Errorf("unsetDashWithColonDash = %q, want foo:-bar", got)
 	}
 	if got := cfg.GetString("database.bcryptHash"); got != "$2a$10$unbracedDollarPreserved" {
 		t.Errorf("bcryptHash = %q, want preserved hash", got)

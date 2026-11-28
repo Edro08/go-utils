@@ -172,6 +172,8 @@ func (o *onceCloser) Close() error {
 type Logger struct {
 	opts   Options
 	slog   *slog.Logger
+	attrs  []slog.Attr
+	groups []string
 	closer io.Closer
 	exit   func(int)
 }
